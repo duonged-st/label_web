@@ -1,0 +1,20 @@
+mongo_data/
+minio_data/
+# --- BACKEND ---
+backend/node_modules/
+backend/.env
+backend/dist/
+backend/*.log
+
+# --- FRONTEND ---
+frontend/node_modules/
+frontend/.env
+frontend/dist/
+frontend/build/
+frontend/.eslintcache
+
+# --- SYSTEM & TOOLS ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

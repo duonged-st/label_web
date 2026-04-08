@@ -1,0 +1,35 @@
+services:
+  mongodb:
+    image: mongo:latest 
+    ports:
+      - "27019:27017"  
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+    volumes:
+      - ./mongo_data:/data/db
+  backend:
+    build: ./backend
+    depends_on:
+      - mongodb
+    ports:
+      - "5000:5000"   
+    env_file:
+      - ./backend/.env 
+  frontend:
+    build: ./frontend 
+    ports:
+      - "80:80"          
+    depends_on:
+      - backend       
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000" 
+      - "9001:9001" 
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin123
+    volumes:
+      - ./minio_data:/data
+    command: server /data --console-address ":9001"
