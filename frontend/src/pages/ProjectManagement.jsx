@@ -19,7 +19,7 @@ export default function ProjectManagement () {
       const token = localStorage.getItem('token');
       
       // Lấy danh sách dự án
-      const response = await fetch('http://backend:5000/api/projects', {
+      const response = await fetch('/api/projects', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const projectsData = await response.json();
@@ -29,7 +29,7 @@ export default function ProjectManagement () {
         const projectsWithCounts = await Promise.all(projectsData.map(async (project) => {
           try {
             // Gọi API images với limit=1 chỉ để lấy cái tổng số (totalImages) cho nhẹ
-            const imgRes = await fetch(`http://backend:5000/api/images?projectId=${project._id}&limit=1`, {
+            const imgRes = await fetch(`/api/images?projectId=${project._id}&limit=1`, {
               headers: { 'Authorization': `Bearer ${token}` }
             });
             const imgData = await imgRes.json();
@@ -61,7 +61,7 @@ export default function ProjectManagement () {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://backend:5000/api/projects', {
+      const response = await fetch('/api/projects', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -92,7 +92,7 @@ export default function ProjectManagement () {
     if (!window.confirm('Bạn có chắc muốn xóa bộ dữ liệu này? Tất cả ảnh và nhãn sẽ bị xóa!')) return;
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://backend:5000/api/projects/${datasetId}`, {
+      const response = await fetch(`/api/projects/${datasetId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -114,7 +114,7 @@ export default function ProjectManagement () {
     }
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://backend:5000/api/projects/${datasetId}`, {
+      const response = await fetch(`/api/projects/${datasetId}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',

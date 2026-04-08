@@ -12,6 +12,30 @@ const minioClient = new minio.Client({
   accessKey: 'admin',
   secretKey: 'admin123'
 });
+
+// Đảm bảo bucket 'originals' tồn tại và cho phép public read
+(async () => {
+  try {
+    const exists = await minioClient.bucketExists('originals');
+    if (!exists) {
+      await minioClient.makeBucket('originals');
+      console.log('Đã tạo bucket "originals" trên MinIO');
+    }
+    // Set policy cho phép đọc public (để nginx proxy có thể truy cập ảnh)
+    const policy = JSON.stringify({
+      Version: '2012-10-17',
+      Statement: [{
+        Effect: 'Allow',
+        Principal: { AWS: ['*'] },
+        Action: ['s3:GetObject'],
+        Resource: ['arn:aws:s3:::originals/*']
+      }]
+    });
+    await minioClient.setBucketPolicy('originals', policy);
+  } catch (err) {
+    console.error('Lỗi khởi tạo MinIO bucket:', err);
+  }
+})();
 // 1. Cấu hình Multer để xác định nơi lưu và cách đặt tên file
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -34,8 +58,8 @@ router.post('/upload', upload.array('images', 1000), async (req, res) => {
       // Trả về object để lưu vào MongoDB
       return {
         filename: minioFileName,
-        // Frontend gọi thẳng đường dẫn này qua cổng 9000 (đã mở public) để xem ảnh
-        path: `http://minio:9000/originals/${minioFileName}`, 
+        // Frontend truy cập ảnh qua nginx reverse proxy
+        path: `/minio-storage/originals/${minioFileName}`,
         projectId: projectId,
         status: 'Chưa gán'
       };

@@ -15,7 +15,7 @@ export default function Register() {
     }
     try {
       // 2. Gọi API đăng ký 
-      const response = await fetch('http://backend:5000/api/register', {
+      const response = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })

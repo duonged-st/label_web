@@ -9,7 +9,7 @@ export default function Dashboard() {
     const fetchProjects = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch('http://backend:5000/api/projects', {
+        const response = await fetch('/api/projects', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
@@ -64,7 +64,7 @@ export default function Dashboard() {
       // Lấy thẻ Token từ localStorage
       const token = localStorage.getItem('token');
       // Bắn lên server
-      const response = await fetch('http://backend:5000/api/upload', {
+      const response = await fetch('/api/upload', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}` // Trình thẻ cho bảo vệ
