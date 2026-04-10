@@ -12,6 +12,10 @@ export default function Labeling() {
   // Xử lý URL ảnh từ DB
   const getImageUrl = (path) => {
     if (!path) return '';
+    // Chuyển đổi URL cũ (http://minio:9000/...) sang proxy path
+    if (path.includes('minio:9000')) {
+      return path.replace(/http:\/\/minio:9000/, '/minio-storage');
+    }
     return path;
   };
   // Lấy tên file từ đường dẫn (vd: image_001.jpg)
