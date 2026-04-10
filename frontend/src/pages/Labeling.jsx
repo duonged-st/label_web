@@ -12,15 +12,13 @@ export default function Labeling() {
   // Xử lý URL ảnh từ DB
   const getImageUrl = (path) => {
     if (!path) return '';
-    return `http://backend:5000/${path.replace(/\\/g, '/')}`;
+    return path;
   };
-
   // Lấy tên file từ đường dẫn (vd: image_001.jpg)
   const getFileName = (path) => {
     if (!path) return 'Unknown';
     return path.split(/[/\\]/).pop();
   };
-
   // 1. Tải danh sách dự án
   useEffect(() => {
     const fetchProjects = async () => {
@@ -47,7 +45,6 @@ export default function Labeling() {
       setImages([]);
       return;
     }
-
     const fetchImages = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -68,7 +65,7 @@ export default function Labeling() {
       } catch (error) {
         console.error('Lỗi tải danh sách ảnh:', error);
       }
-    };
+    }; 
     fetchImages();
   }, [selectedProjectId]);
 

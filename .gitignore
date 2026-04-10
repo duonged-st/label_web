@@ -1,5 +1,5 @@
-mongo_data/
-minio_data/
+mongo_data/*
+minio_data/*
 # --- BACKEND ---
 backend/node_modules/
 backend/.env
