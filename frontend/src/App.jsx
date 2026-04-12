@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import ProtectedRoutes from './components/ProtectedRoutes';
 import ProjectManagement from './pages/ProjectManagement';
 import LabelManagement from './pages/LabelManagement';
+import ImageManagement from './pages/ImageManagement';
 import Labeling from './pages/Labeling';
 function App() {
   return (
@@ -32,6 +33,11 @@ function App() {
         <Route path="/labeling" element={
           <ProtectedRoutes>
             <Labeling />
+          </ProtectedRoutes>
+        } />
+        <Route path="/image-management" element={
+          <ProtectedRoutes>
+            <ImageManagement />
           </ProtectedRoutes>
         } />
       </Routes>
