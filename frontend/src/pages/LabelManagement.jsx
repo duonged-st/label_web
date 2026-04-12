@@ -15,7 +15,7 @@ export default function LabelManagement() {
   const fetchProjects = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://backend:5000/api/projects', {
+      const response = await fetch('/api/projects', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -54,7 +54,7 @@ export default function LabelManagement() {
       const updatedLabels = [...selectedDataset.labels, newLabelName.trim()];
 
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://backend:5000/api/projects/${selectedDatasetId}`, {
+      const response = await fetch(`/api/projects/${selectedDatasetId}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -83,7 +83,7 @@ export default function LabelManagement() {
       const updatedLabels = selectedDataset.labels.filter((_, index) => index !== indexToRemove);
 
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://backend:5000/api/projects/${selectedDatasetId}`, {
+      const response = await fetch(`/api/projects/${selectedDatasetId}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -122,7 +122,7 @@ export default function LabelManagement() {
       );
 
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://backend:5000/api/projects/${selectedDatasetId}`, {
+      const response = await fetch(`/api/projects/${selectedDatasetId}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',

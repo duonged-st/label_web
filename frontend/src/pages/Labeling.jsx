@@ -28,7 +28,7 @@ export default function Labeling() {
     const fetchProjects = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch('http://backend:5000/api/projects', {
+        const response = await fetch('/api/projects', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
@@ -52,7 +52,7 @@ export default function Labeling() {
     const fetchImages = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`http://backend:5000/api/images?projectId=${selectedProjectId}&limit=100`, {
+        const response = await fetch(`/api/images?projectId=${selectedProjectId}&limit=100`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
@@ -98,7 +98,7 @@ export default function Labeling() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://backend:5000/api/evaluate', {
+      const response = await fetch('/api/evaluate', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -140,7 +140,7 @@ export default function Labeling() {
       
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`http://backend:5000/api/evaluate/${currentImage._id}`, {
+        const response = await fetch(`/api/evaluate/${currentImage._id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         });
