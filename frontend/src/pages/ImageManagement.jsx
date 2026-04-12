@@ -179,9 +179,6 @@ export default function ImageManagement() {
 
           {/* Actions */}
           <div className="flex gap-2">
-            <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm transition-colors">
-              Tải ảnh lên (Upload)
-            </button>
             <button 
               onClick={handleDeleteSelected}
               className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm disabled:opacity-50 transition-colors"
