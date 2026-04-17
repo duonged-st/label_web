@@ -133,11 +133,9 @@ export default function Labeling() {
   // 4. Xử lý Nút Reset
   const handleReset = async () => {
     if (!currentImage) return;
-
     // Nếu ảnh đã lưu vào CSDL, gọi API xóa để gỡ màu xanh
     if (currentImage.status === 'Đã gán') {
       if (!window.confirm('Ảnh này đã lưu nhãn. Bạn có chắc muốn xóa nhãn trên hệ thống?')) return;
-      
       try {
         const token = localStorage.getItem('token');
         const response = await fetch(`/api/evaluate/${currentImage._id}`, {
@@ -292,7 +290,6 @@ export default function Labeling() {
             </div>
           )}
         </main>
-        
       </div>
     </div>
   );

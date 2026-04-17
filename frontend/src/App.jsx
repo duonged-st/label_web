@@ -22,12 +22,12 @@ function App() {
           </ProtectedRoutes>
         } />
         <Route path="/project-management" element={
-          <ProtectedRoutes>
+          <ProtectedRoutes adminOnly = {true}>
             <ProjectManagement />
           </ProtectedRoutes>
         } />
         <Route path="/label-management" element={
-          <ProtectedRoutes>
+          <ProtectedRoutes adminOnly = {true}>
             <LabelManagement />
           </ProtectedRoutes>
         } />
@@ -42,7 +42,7 @@ function App() {
           </ProtectedRoutes>
         } />
         <Route path="/user-management" element={
-          <ProtectedRoutes>
+          <ProtectedRoutes adminOnly = {true}>
             <UserManagement />
           </ProtectedRoutes>
         } />

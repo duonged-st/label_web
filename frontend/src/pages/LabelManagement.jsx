@@ -1,16 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import Navigation from '../components/Navigation';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
-
 export default function LabelManagement() {
   const [datasets, setDatasets] = useState([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState(null);
   const [newLabelName, setNewLabelName] = useState('');
-  
   // Dùng index (vị trí trong mảng) thay vì ID giả
   const [editingLabelIndex, setEditingLabelIndex] = useState(null);
   const [editingLabelName, setEditingLabelName] = useState('');
-
   // 1. Lấy danh sách dự án thật từ Backend
   const fetchProjects = async () => {
     try {

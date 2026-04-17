@@ -17,12 +17,11 @@ export default function Login() {
       const data = await response.json();
       if (response.ok) {
         alert('Đăng nhập thành công!');
-        // Lưu token vào localStorage để dùng cho các request gán nhãn sau này
         localStorage.setItem('token', data.token);
-        // Chuyển hướng người dùng vào trang dashboard
+        localStorage.setItem('userRole', String(data.role || 'user').toLowerCase()); 
         Navigate('/dashboard');
       } else {
-        alert(data.message); // Hiển thị lỗi từ backend
+        alert(data.message); 
       }
     } catch (error) {
       console.error('Lỗi kết nối:', error);
