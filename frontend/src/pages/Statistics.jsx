@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Navigation from '../components/Navigation';
-import { Download, Loader2, FileDownloader } from 'lucide-react';
+import { Download, Loader2 } from 'lucide-react';
 
 export default function Statistics() {
   const [data, setData] = useState({
     totalLabeledImages: 0,
     userStatistics: [],
-    projectStats: []
+    projectStatistics: []
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -20,7 +20,11 @@ export default function Statistics() {
         
         if (response.ok) {
           const result = await response.json();
-          setData(result);
+          setData({
+            totalLabeledImages: result.totalLabeledImages || 0,
+            userStatistics: result.userStatistics || [],
+            projectStatistics: result.projectStatistics || result.projectStats || []
+          });
         }
       } catch (error) {
         console.error('Lỗi tải thống kê:', error);
@@ -32,7 +36,6 @@ export default function Statistics() {
     fetchStatistics();
   }, []);
 
-  // Hàm tải file CSV có bảo mật bằng Token
   const handleExportCSV = async (projectId, projectName) => {
     try {
       const token = localStorage.getItem('token');
@@ -46,7 +49,6 @@ export default function Statistics() {
         return;
       }
 
-      // Biến dữ liệu nhận được thành file và ép trình duyệt tải xuống
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -73,6 +75,8 @@ export default function Statistics() {
     );
   }
 
+  const projectStats = data.projectStatistics || data.projectStats || [];
+
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Navigation />
@@ -80,15 +84,13 @@ export default function Statistics() {
       <main className="flex-1 p-6 overflow-y-auto">
         <h1 className="text-2xl font-bold mb-6 text-gray-800">Báo cáo Thống kê</h1>
 
-        {/* Tổng quan toàn hệ thống */}
         <div className="bg-white border border-gray-200 rounded p-6 mb-6 shadow-sm max-w-sm">
           <p className="text-sm font-medium text-gray-500 mb-2 uppercase tracking-wide">Tổng ảnh đã gán nhãn toàn hệ thống</p>
           <p className="text-4xl font-extrabold text-blue-600">{data.totalLabeledImages}</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* CỘT TRÁI: Thống kê người dùng */}
+
           <div className="lg:col-span-1">
             <div className="bg-white border border-gray-200 rounded shadow-sm overflow-hidden">
               <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
@@ -117,23 +119,20 @@ export default function Statistics() {
             </div>
           </div>
 
-          {/* CỘT PHẢI: Thống kê & Quản lý Dự án */}
           <div className="lg:col-span-2 space-y-4">
-            <h2 className="font-bold text-xl text-gray-800 mb-2">Tiến độ theo Dự án</h2>
-            
-            {data.projectStats.length === 0 ? (
+            <h2 className="font-bold text-xl text-gray-800 mb-2">Tiến độ theo Dự án</h2> 
+            {projectStats.length === 0 ? (
               <div className="bg-white border border-gray-200 rounded p-8 text-center text-gray-500">
                 Chưa có dự án nào trên hệ thống
               </div>
             ) : (
-              data.projectStats.map((project) => (
+              projectStats.map((project) => (
                 <div key={project._id} className="bg-white border border-gray-200 rounded p-5 shadow-sm">
                   
                   <div className="flex justify-between items-start mb-4">
                     <h3 className="font-bold text-lg text-blue-700">{project.name}</h3>
                   </div>
 
-                  {/* Chỉ số ảnh */}
                   <div className="grid grid-cols-3 gap-4 mb-3">
                     <div className="bg-gray-50 p-3 rounded border border-gray-100">
                       <p className="text-xs text-gray-500 uppercase mb-1">Tổng ảnh</p>
@@ -149,7 +148,6 @@ export default function Statistics() {
                     </div>
                   </div>
 
-                  {/* Thanh Tiến Độ */}
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-5 overflow-hidden">
                     <div 
                       className="bg-green-500 h-2 rounded-full transition-all duration-500" 
@@ -157,7 +155,6 @@ export default function Statistics() {
                     />
                   </div>
 
-                  {/* Phân bổ nhãn (Độ đồng thuận) */}
                   <div className="mb-5">
                     <p className="text-sm font-semibold text-gray-700 mb-2">Tỉ lệ phân bổ nhãn đã gán:</p>
                     {project.labelDistribution.length === 0 ? (
@@ -175,7 +172,6 @@ export default function Statistics() {
                     )}
                   </div>
 
-                  {/* Nút Xuất CSV cho từng dự án ở cuối */}
                   <div className="pt-4 border-t border-gray-100 flex justify-end">
                     <button 
                       onClick={() => handleExportCSV(project._id, project.name)}

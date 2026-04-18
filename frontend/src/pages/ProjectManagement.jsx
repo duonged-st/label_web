@@ -7,34 +7,29 @@ export default function ProjectManagement () {
   const [isLoading, setIsLoading] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
-  // 0. Hàm này sẽ được gọi khi bấm nút Sửa, nó sẽ bật chế độ sửa cho dự án đó
+
   const startEditing = (dataset) => {
     setEditingId(dataset._id);
     setEditName(dataset.name);
   };
-  // 1. Gọi API lấy danh sách dự án từ MongoDB
-// 1. Gọi API lấy danh sách dự án từ MongoDB và đếm số ảnh
+
   const fetchProjects = async () => {
     try {
       const token = localStorage.getItem('token');
-      
-      // Lấy danh sách dự án
+
       const response = await fetch('/api/projects', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const projectsData = await response.json();
       
       if (response.ok) {
-        // Dùng Promise.all để gọi API hỏi số lượng ảnh của TỪNG dự án một lúc
         const projectsWithCounts = await Promise.all(projectsData.map(async (project) => {
           try {
-            // Gọi API images với limit=1 chỉ để lấy cái tổng số (totalImages) cho nhẹ
             const imgRes = await fetch(`/api/images?projectId=${project._id}&limit=1`, {
               headers: { 'Authorization': `Bearer ${token}` }
             });
             const imgData = await imgRes.json();
-            
-            // Gắn thêm con số imageCount vào object của dự án
+
             return { ...project, imageCount: imgData.totalImages || 0 };
           } catch (err) {
             console.error(`Lỗi đếm ảnh cho dự án ${project._id}:`, err);
@@ -48,11 +43,11 @@ export default function ProjectManagement () {
       console.error('Lỗi tải dữ liệu:', error);
     }
   };
-  // Tự động load dữ liệu khi vừa vào trang
+
   useEffect(() => {
     fetchProjects();
   }, []);
-  // 2. Gọi API thêm dự án mới
+
   const handleAddDataset = async () => {
     if (!newDatasetName.trim()) {
       alert('Vui lòng nhập tên dự án');
@@ -69,14 +64,14 @@ export default function ProjectManagement () {
         },
         body: JSON.stringify({
           name: newDatasetName.trim(),
-          description: '', // Giao diện này không có mô tả nên gửi rỗng
-          labels: []       // Mặc định chưa có nhãn nào
+          description: '',
+          labels: []
         })
       });
       const data = await response.json();
       if (response.ok) {
-        setNewDatasetName(''); // Xóa form
-        fetchProjects();       // Bắt nó gọi lại API để cập nhật list
+        setNewDatasetName('');
+        fetchProjects();
       } else {
         alert(data.message || 'Lỗi khi tạo bộ dữ liệu!');
       }
@@ -87,7 +82,7 @@ export default function ProjectManagement () {
       setIsLoading(false);
     }
   };
-  // 3. Gọi API xóa dự án
+
   const handleDeleteDataset = async (datasetId) => {
     if (!window.confirm('Bạn có chắc muốn xóa bộ dữ liệu này? Tất cả ảnh và nhãn sẽ bị xóa!')) return;
     try {
@@ -98,7 +93,7 @@ export default function ProjectManagement () {
       });
 
       if (response.ok) {
-        fetchProjects(); // Xóa thành công thì tải lại list
+        fetchProjects();
       } else {
         alert('Lỗi khi xóa dự án!');
       }
@@ -106,7 +101,7 @@ export default function ProjectManagement () {
       console.error('Lỗi:', error);
     }
   };
-  // 4. Gọi API sửa tên dự án
+
   const handleEditDataset = async (datasetId) => {
     if (!editName.trim()) {
       alert('Tên dự án không được để trống!');
@@ -123,8 +118,8 @@ export default function ProjectManagement () {
         body: JSON.stringify({ name: editName.trim() }) // Gửi tên mới lên Backend
       });
       if (response.ok) {
-        setEditingId(null); // Tắt chế độ sửa
-        fetchProjects();    // Tải lại dữ liệu mới
+        setEditingId(null);
+        fetchProjects();
       } else {
         const data = await response.json();
         alert(data.message || 'Lỗi khi cập nhật dự án!');
@@ -163,7 +158,7 @@ export default function ProjectManagement () {
             </button>
           </div>
         </div>
-        {/* Project List */}
+
         <div className="bg-white border border-gray-200 rounded p-4">
           <h2 className="font-bold mb-4">Danh sách dự án</h2>
           {datasets.length === 0 ? (
@@ -174,10 +169,9 @@ export default function ProjectManagement () {
             <div className="space-y-3">
               {datasets.map(dataset => (
                 <div
-                  key={dataset._id} // Dùng _id của MongoDB
+                  key={dataset._id}
                   className="flex justify-between items-center p-4 border border-gray-200 rounded hover:bg-gray-50"
                 >
-                  {/* LOGIC HIỂN THỊ UI SỬA HOẶC XEM */}
                   {editingId === dataset._id ? (
                     <div className="flex-1 flex items-center gap-2 mr-4">
                       <input
@@ -211,7 +205,7 @@ export default function ProjectManagement () {
                       </div>
                     </div>
                   )}
-                  {/* Nhóm nút Sửa & Xóa (Chỉ hiện khi KHÔNG ở chế độ sửa) */}
+
                    {editingId !== dataset._id && (
                   <div className="flex gap-1">
                     <button

@@ -5,10 +5,9 @@ export default function LabelManagement() {
   const [datasets, setDatasets] = useState([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState(null);
   const [newLabelName, setNewLabelName] = useState('');
-  // Dùng index (vị trí trong mảng) thay vì ID giả
   const [editingLabelIndex, setEditingLabelIndex] = useState(null);
   const [editingLabelName, setEditingLabelName] = useState('');
-  // 1. Lấy danh sách dự án thật từ Backend
+
   const fetchProjects = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -19,7 +18,6 @@ export default function LabelManagement() {
       
       if (response.ok) {
         setDatasets(data);
-        // Tự động chọn dự án đầu tiên nếu chưa chọn gì
         if (data.length > 0 && !selectedDatasetId) {
           setSelectedDatasetId(data[0]._id);
         }
@@ -29,13 +27,12 @@ export default function LabelManagement() {
     }
   };
   useEffect(() => {
-    // eslint-disable-next-line
     fetchProjects();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Tìm dự án đang được click chọn bên trái
+
   const selectedDataset = datasets.find(d => d._id === selectedDatasetId);
 
-  // 2. Thêm nhãn mới
   const handleAddLabel = async () => {
     if (!newLabelName.trim()) {
       alert('Vui lòng nhập tên nhãn');
@@ -47,7 +44,6 @@ export default function LabelManagement() {
     }
 
     try {
-      // Tạo mảng nhãn mới: Giữ nguyên các nhãn cũ + nhét nhãn mới vào cuối
       const updatedLabels = [...selectedDataset.labels, newLabelName.trim()];
 
       const token = localStorage.getItem('token');
@@ -57,12 +53,12 @@ export default function LabelManagement() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ labels: updatedLabels }) // Gửi mảng mới đè lên mảng cũ
+        body: JSON.stringify({ labels: updatedLabels })
       });
 
       if (response.ok) {
         setNewLabelName('');
-        fetchProjects(); // Gọi lại API để load giao diện mới
+        fetchProjects();
       } else {
         alert('Lỗi khi thêm nhãn!');
       }
@@ -71,12 +67,10 @@ export default function LabelManagement() {
     }
   };
 
-  // 3. Xóa nhãn
   const handleDeleteLabel = async (indexToRemove) => {
     if (!window.confirm('Bạn có chắc muốn xóa nhãn này?')) return;
 
     try {
-      // Lọc bỏ nhãn ở vị trí indexToRemove
       const updatedLabels = selectedDataset.labels.filter((_, index) => index !== indexToRemove);
 
       const token = localStorage.getItem('token');
@@ -99,13 +93,11 @@ export default function LabelManagement() {
     }
   };
 
-  // Kích hoạt ô sửa nhãn
   const startEditing = (index, currentName) => {
     setEditingLabelIndex(index);
     setEditingLabelName(currentName);
   };
 
-  // 4. Lưu nhãn sau khi sửa
   const handleSaveLabel = async () => {
     if (!editingLabelName.trim()) {
       alert('Vui lòng nhập tên nhãn');
@@ -113,7 +105,6 @@ export default function LabelManagement() {
     }
 
     try {
-      // Tạo mảng nhãn mới: Tìm đúng vị trí index đang sửa và thay bằng chữ mới
       const updatedLabels = selectedDataset.labels.map((label, index) => 
         index === editingLabelIndex ? editingLabelName.trim() : label
       );
@@ -153,7 +144,7 @@ export default function LabelManagement() {
         <h1 className="text-2xl font-bold mb-6">Quản lý nhãn</h1>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {}
+
           <div className="bg-white border border-gray-200 rounded p-4">
             <h2 className="font-bold mb-3 text-gray-800">Dự án của bạn</h2>
             <div className="space-y-2">
@@ -166,7 +157,7 @@ export default function LabelManagement() {
                     onClick={() => setSelectedDatasetId(dataset._id)}
                     className={`w-full flex justify-between items-center p-3 rounded cursor-pointer transition-colors ${
                       selectedDatasetId === dataset._id
-                        ? 'bg-blue-50 border-l-4 border-blue-600 text-blue-700' // Đổi style chút cho nổi bật khi chọn
+                        ? 'bg-blue-50 border-l-4 border-blue-600 text-blue-700'
                         : 'hover:bg-gray-100 border-l-4 border-transparent text-gray-700'
                     }`}
                   >
@@ -181,7 +172,7 @@ export default function LabelManagement() {
               )}
             </div>
           </div>
-          {/* CỘT PHẢI: Khu vực quản lý nhãn của dự án đang chọn */}
+
           <div className="md:col-span-2 bg-white border border-gray-200 rounded p-4">
             {selectedDataset ? (
               <>
@@ -211,15 +202,13 @@ export default function LabelManagement() {
                 {/* Danh sách các nhãn hiện có */}
                 <div className="space-y-2">
                   {!selectedDataset.labels || selectedDataset.labels.length === 0 ? (
-                    <div>
-                    </div>
+                    <div />
                   ) : (
                     selectedDataset.labels.map((label, index) => (
                       <div
                         key={index}
                         className="flex justify-between items-center p-3 border border-gray-200 rounded hover:bg-gray-50"
                       >
-                        {/* NẾU ĐANG SỬA */}
                         {editingLabelIndex === index ? (
                           <div className="flex items-center gap-2 flex-1">
                             <input
@@ -244,7 +233,6 @@ export default function LabelManagement() {
                             </button>
                           </div>
                         ) : (
-                          /* NẾU KHÔNG SỬA (Hiển thị bình thường) */
                           <>
                             <span className="font-medium text-gray-700 flex-1">{label}</span>
                             <div className="flex gap-2">

@@ -13,12 +13,11 @@ export default function ImageManagement() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // 1. Lấy danh sách Dự án
   useEffect(() => {
     const fetchProjects = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch('/api/projects', { // Nginx sẽ tự proxy sang http://backend:5000/api/projects
+        const response = await fetch('/api/projects', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (response.ok) {
@@ -32,7 +31,6 @@ export default function ImageManagement() {
     fetchProjects();
   }, []);
 
-  // 2. Lấy danh sách Ảnh
   const fetchImages = async () => {
     setIsLoading(true);
     try {
@@ -63,18 +61,19 @@ export default function ImageManagement() {
     setSelectedImages([]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, filterStatus, filterCategory]);
+
   const displayedImages = images.filter(img => {
     const fileNameMatches = img.filename?.toLowerCase().includes(searchQuery.toLowerCase());
     const labelMatches = img.finalLabels?.some(label => label.toLowerCase().includes(searchQuery.toLowerCase()));
     return fileNameMatches || labelMatches;
   });
-  // 4. Xử lý Checkbox chọn ảnh
+
   const toggleImageSelection = (id) => {
     setSelectedImages(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
   };
-  // 5. Tính năng XÓA ẢNH thật trên Backend và MinIO
+
   const handleDeleteSelected = async () => {
     if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn ${selectedImages.length} ảnh này khỏi hệ thống?`)) return;
 
@@ -89,7 +88,7 @@ export default function ImageManagement() {
       ));
       alert('Đã xóa ảnh thành công!');
       setSelectedImages([]);
-      fetchImages(); 
+      fetchImages();
     } catch (error) {
       console.error('Lỗi khi xóa ảnh:', error);
       alert('Có lỗi xảy ra khi xóa ảnh.');
@@ -97,6 +96,7 @@ export default function ImageManagement() {
       setIsLoading(false);
     }
   };
+
   const handleDeleteAllByProject = async () => {
     if (filterCategory === 'all') {
       alert('Vui lòng chọn một dự án cụ thể trước khi xóa tất cả ảnh.');
@@ -128,7 +128,7 @@ export default function ImageManagement() {
       setIsLoading(false);
     }
   };
-  // Định dạng ngày tháng
+
   const formatDate = (dateString) => {
     if (!dateString) return '';
     return new Date(dateString).toLocaleDateString('vi-VN', {
@@ -140,12 +140,12 @@ export default function ImageManagement() {
       <Navigation />  
       <main className="flex-1 p-6">
         <h1 className="text-2xl font-bold mb-6">Quản lý ảnh</h1>
-        {/* Stats */}
+
         <div className="bg-white border border-gray-200 rounded p-4 mb-4 flex gap-6 text-sm">
           <div>Tổng số ảnh trong bộ lọc: <strong className="text-blue-600">{stats.total}</strong></div>
           <div className="text-gray-500 italic">*Chọn bộ lọc bên dưới để xem chi tiết</div>
         </div>
-        {/* Filters */}
+
         <div className="bg-white border border-gray-200 rounded p-4 mb-4">
           <div className="flex flex-col md:flex-row gap-3 mb-3">
             {/* Search */}
@@ -159,7 +159,7 @@ export default function ImageManagement() {
                 className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded focus:border-blue-500 outline-none"
               />
             </div>
-            {/* Status Filter */}
+
             <select
               value={filterStatus}
               onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
@@ -169,7 +169,7 @@ export default function ImageManagement() {
               <option value="Đã gán">Đã gán nhãn</option>
               <option value="Chưa gán">Chưa gán nhãn</option>
             </select>
-            {/* Category*/}
+
             <select
               value={filterCategory}
               onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }}
@@ -181,7 +181,7 @@ export default function ImageManagement() {
               ))}
             </select>
           </div>
-          {/* Actions */}
+
           <div className="flex gap-2">
             <button 
               onClick={handleDeleteSelected}
@@ -201,7 +201,7 @@ export default function ImageManagement() {
             </button>
           </div>
         </div>
-        {/* Images Grid */}
+
         {isLoading ? (
           <div className="flex justify-center items-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -216,31 +216,29 @@ export default function ImageManagement() {
                     selectedImages.includes(image._id) ? 'border-blue-500 border-2 shadow-md' : 'border-gray-200 hover:shadow-sm'
                   }`}
                 >
-                  {/* Image Container */}
                   <div className="relative aspect-square bg-gray-100 group cursor-pointer" onClick={() => toggleImageSelection(image._id)}>
-                    {/* Nhờ Nginx proxy, đường dẫn /minio-storage/... từ DB sẽ load được ngay lập tức */}
                     <img 
                       src={image.path} 
                       alt={image.filename}
                       className="w-full h-full object-cover"
                       loading="lazy"
                     />
-                    {/* Status Badge */}
+
                     <div className={`absolute top-2 right-2 px-2 py-1 rounded text-xs font-medium ${
                       image.status === 'Đã gán' ? 'bg-green-500 text-white shadow-sm' : 'bg-orange-500 text-white shadow-sm'
                     }`}>
                       {image.status}
                     </div>
-                    {/* Checkbox */}
+
                     <input
                       type="checkbox"
                       checked={selectedImages.includes(image._id)}
                       onChange={() => toggleImageSelection(image._id)}
                       className="absolute top-3 left-3 w-4 h-4 cursor-pointer"
-                      onClick={(e) => e.stopPropagation()} // Tránh click đúp event
+                      onClick={(e) => e.stopPropagation()}
                     />
                   </div>
-                  {/* Info */}
+
                   <div className="p-3">
                     <h3 className="font-medium text-sm mb-1 truncate" title={image.filename}>
                       {image.filename?.split('-').slice(1).join('-') || image.filename} 
@@ -248,7 +246,7 @@ export default function ImageManagement() {
                     <p className="text-xs text-gray-500 mb-2 truncate">
                       Dự án: <span className="font-medium text-gray-700">{image.projectId?.name || 'Không xác định'}</span>
                     </p>
-                    {/* Render Labels nếu có */}
+
                     {image.finalLabels && image.finalLabels.length > 0 ? (
                       <div className="flex flex-wrap gap-1 mb-2">
                         {image.finalLabels.map((label, idx) => (
@@ -261,7 +259,7 @@ export default function ImageManagement() {
                         ))}
                       </div>
                     ) : (
-                      <div className="h-6 mb-2"></div> // Giữ layout không bị xô lệch
+                      <div className="h-6 mb-2" />
                     )}  
                     <div className="text-xs text-gray-400 mt-2">
                       Upload: {formatDate(image.uploadDate || image.createdAt)}
@@ -270,7 +268,7 @@ export default function ImageManagement() {
                 </div>
               ))}
             </div>
-            {/* Empty State */}
+
             {!isLoading && displayedImages.length === 0 && (
               <div className="bg-white border border-gray-200 rounded p-12 text-center">
                 <Search className="w-12 h-12 mx-auto text-gray-300 mb-3" />
@@ -278,7 +276,7 @@ export default function ImageManagement() {
                 <p className="text-sm text-gray-500">Thử thay đổi bộ lọc, trang hoặc tải thêm ảnh lên hệ thống.</p>
               </div>
             )}
-            {/* Phân trang (Pagination) */}
+
             {totalPages > 1 && (
               <div className="flex justify-center items-center gap-4 mt-8">
                 <button 

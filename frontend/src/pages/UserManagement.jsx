@@ -6,20 +6,17 @@ export default function UserManagement() {
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  
-  // Modal states
+
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
-  
-  // Form states
+
   const [formUsername, setFormUsername] = useState('');
-  const [formPassword, setFormPassword] = useState(''); // Mật khẩu chỉ dùng khi thêm mới
+  const [formPassword, setFormPassword] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formRole, setFormRole] = useState('user');
   const [formDatasets, setFormDatasets] = useState([]);
 
-  // Lấy dữ liệu khi vào trang
   useEffect(() => {
     fetchData();
   }, []);
@@ -44,7 +41,6 @@ export default function UserManagement() {
     }
   };
 
-  // --- XỬ LÝ MỞ MODAL ---
   const handleOpenAddModal = () => {
     setIsAddingNew(true);
     setEditingUser(null);
@@ -62,7 +58,6 @@ export default function UserManagement() {
     setFormUsername(user.username || '');
     setFormEmail(user.email || '');
     setFormRole(String(user.role || 'user').toLowerCase());
-    // Rút mảng _id từ danh sách dự án
     setFormDatasets((user.allowedProjects || []).map(p => p._id));
     setShowModal(true);
   };
@@ -77,7 +72,6 @@ export default function UserManagement() {
     );
   };
 
-  // --- API: THÊM / SỬA NGƯỜI DÙNG ---
   const handleSave = async () => {
     if (isAddingNew && (!formUsername.trim() || !formPassword.trim())) {
       alert('Vui lòng nhập tên đăng nhập và mật khẩu!');
@@ -93,7 +87,6 @@ export default function UserManagement() {
       };
 
       if (isAddingNew) {
-        // GỌI API THÊM MỚI (Trỏ vào auth.js)
         const response = await fetch('/api/register', {
           method: 'POST',
           headers,
@@ -116,7 +109,6 @@ export default function UserManagement() {
         }
 
       } else if (editingUser) {
-        // GỌI API CẬP NHẬT (Trỏ vào user.js)
         const response = await fetch(`/api/users/${editingUser._id}`, {
           method: 'PUT',
           headers,
@@ -140,7 +132,6 @@ export default function UserManagement() {
     }
   };
 
-  // --- API: XÓA NGƯỜI DÙNG ---
   const handleDeleteUser = async (userId) => {
     if (!window.confirm('Bạn có chắc chắn muốn xóa người dùng này khỏi hệ thống? Hành động này không thể hoàn tác!')) return;
 
@@ -154,7 +145,7 @@ export default function UserManagement() {
 
       if (response.ok) {
         alert('Đã xóa người dùng thành công!');
-        fetchData(); // Tải lại danh sách
+        fetchData();
       } else {
         const data = await response.json();
         alert(`Lỗi: ${data.message}`);

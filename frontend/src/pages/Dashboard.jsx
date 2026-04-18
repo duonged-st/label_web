@@ -16,7 +16,6 @@ export default function Dashboard() {
         
         if (response.ok) {
           setProjects(data);
-          // Nếu có dự án, tự động chọn dự án đầu tiên làm mặc định
           if (data.length > 0) {
             setSelectedProjectId(data[0]._id);
           }
@@ -44,7 +43,7 @@ export default function Dashboard() {
   const removeFile = (index) => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
-  // Hàm này đã được "bố" nâng cấp để bắn API lên Backend thật
+
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
       alert('Vui lòng chọn ảnh để upload');
@@ -55,26 +54,23 @@ export default function Dashboard() {
       return;
     }
     try {
-      // Đóng gói ảnh vào FormData
       const formData = new FormData();
       selectedFiles.forEach((file) => {
         formData.append('images', file);
       });
       formData.append('projectId', selectedProjectId);
-      // Lấy thẻ Token từ localStorage
       const token = localStorage.getItem('token');
-      // Bắn lên server
       const response = await fetch('/api/upload', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}` // Trình thẻ cho bảo vệ
+          'Authorization': `Bearer ${token}`
         },
         body: formData,
       });
       const data = await response.json();
       if (response.ok) {
         alert(`Đã upload thành công ${selectedFiles.length} ảnh vào dự án ${projects.find(p => p._id === selectedProjectId)?.name}`);
-        setSelectedFiles([]); // Upload xong thì xóa trắng danh sách đã chọn
+        setSelectedFiles([]);
       } else {
         alert(data.message || 'Lỗi khi tải ảnh lên!');
       }
@@ -85,11 +81,9 @@ export default function Dashboard() {
   };
   return (
     <div className="flex min-h-screen bg-gray-50">
-      {/* Navigation Sidebar */}
       <Navigation />
       <main className="flex-1 p-6">
         <h1 className="text-2xl font-bold mb-6">Upload ảnh</h1>
-        {/* Upload Area */}
         <div className="bg-white border border-gray-200 rounded p-6 mb-6">
           <label className="block mb-4">
             <span className="text-sm font-medium mb-2 block">Chọn dự án</span>
@@ -124,7 +118,6 @@ export default function Dashboard() {
               >
                 Chọn ảnh
               </label>
-              {}
               <input
                 type="file"
                 multiple
@@ -145,7 +138,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-        {/* Selected Files */}
         {selectedFiles.length > 0 && (
           <div className="bg-white border border-gray-200 rounded p-6 mb-6">
             <h2 className="font-bold mb-3">Đã chọn {selectedFiles.length} ảnh</h2>

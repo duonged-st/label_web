@@ -2,30 +2,27 @@ import React, { useState, useEffect } from 'react';
 import Navigation from '../components/Navigation';
 import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'; 
 export default function Labeling() {
-  // State quản lý dữ liệu từ API
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [images, setImages] = useState([]);
-  // State quản lý UI
   const [selectedImageId, setSelectedImageId] = useState(null);
   const [selectedLabels, setSelectedLabels] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
-  // Xử lý URL ảnh từ DB
+
   const getImageUrl = (path) => {
     if (!path) return '';
-    // Chuyển đổi URL cũ (http://minio:9000/...) sang proxy path
     if (path.includes('minio:9000')) {
       return path.replace(/http:\/\/minio:9000/, '/minio-storage');
     }
     return path;
   };
-  // Lấy tên file từ đường dẫn (vd: image_001.jpg)
+
   const getFileName = (path) => {
     if (!path) return 'Unknown';
     return path.split(/[/\\]/).pop();
   };
-  // 1. Tải danh sách dự án
+
   useEffect(() => {
     const fetchProjects = async () => {
       try {
@@ -45,7 +42,6 @@ export default function Labeling() {
     fetchProjects();
   }, []);
 
-  // 2. Tải danh sách ảnh khi chọn Dự án
   useEffect(() => {
     if (!selectedProjectId) {
       setImages([]);
@@ -91,7 +87,6 @@ export default function Labeling() {
     }
   }, [selectedImageId, currentImage]);
 
-  // 3. Xử lý Lưu Nhãn
   const handleSaveLabel = async () => {
     if (!selectedLabels.length) {
       alert('Vui lòng chọn ít nhất một nhãn để lưu');
@@ -116,7 +111,6 @@ export default function Labeling() {
       });
 
       if (response.ok) {
-        // Cập nhật state để thẻ ảnh bên trái biến thành màu xanh lá
         const newImages = images.map(img => 
           img._id === currentImage._id 
             ? { ...img, status: 'Đã gán', finalLabels: selectedLabels } 
@@ -134,10 +128,8 @@ export default function Labeling() {
     }
   };
 
-  // 4. Xử lý Nút Reset
   const handleReset = async () => {
     if (!currentImage) return;
-    // Nếu ảnh đã lưu vào CSDL, gọi API xóa để gỡ màu xanh
     if (currentImage.status === 'Đã gán') {
       if (!window.confirm('Ảnh này đã lưu nhãn. Bạn có chắc muốn xóa nhãn trên hệ thống?')) return;
       try {
@@ -160,7 +152,6 @@ export default function Labeling() {
         console.error('Lỗi reset nhãn:', error);
       }
     } else {
-      // Nếu chưa lưu, chỉ xóa lựa chọn nhãn đang bấm nháp trên màn hình
       setSelectedLabels([]);
     }
   };
@@ -170,10 +161,8 @@ export default function Labeling() {
       <Navigation />
       
       <div className="flex flex-1 overflow-hidden h-screen">
-        
-        {/* SIDEBAR TRÁI: Chọn dự án & Danh sách ảnh */}
+
         <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
-          {/* Khu vực chọn Dự án ngay bên trong */}
           <div className="p-3 border-b border-gray-200">
             <div className="text-xs text-gray-500 mb-1">Bộ dữ liệu:</div>
             <select
@@ -198,7 +187,7 @@ export default function Labeling() {
               </span>
             )}
           </div>
-          {/* Danh sách ảnh */}
+
           <div className="p-2 overflow-y-auto flex-1">
             {images.map((image) => {
               const fileName = getFileName(image.path);
@@ -208,7 +197,7 @@ export default function Labeling() {
                   onClick={() => setSelectedImageId(image._id)}
                   className={`w-full text-left px-3 py-2 text-sm rounded mb-1 truncate transition-colors ${
                     image.status === 'Đã gán'
-                      ? 'bg-green-100 text-green-700 border border-green-300' // Bôi xanh lá
+                      ? 'bg-green-100 text-green-700 border border-green-300'
                       : selectedImageId === image._id
                       ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-700 hover:bg-gray-100'
@@ -222,18 +211,15 @@ export default function Labeling() {
           </div>
         </aside>
 
-        {/* NỘI DUNG CHÍNH (MAIN CONTENT) */}
         <main className="flex-1 p-6 overflow-y-auto">
           {currentImage ? (
             <div className="max-w-4xl mx-auto">
-              
-              {/* Header */}
+
               <h className="text-xl font-bold mb-4 text-gray-800">
                 Classification of {getFileName(currentImage.path)}
               </h>
-              {/* Ảnh lớn & Thanh Zoom */}
+
               <div className="bg-white border border-gray-200 rounded p-6 mb-6 shadow-sm flex flex-col items-center">
-                {/* 1. Khung chứa ảnh (có overflow-hidden để không tràn viền) */}
                 <div className="relative w-full h-[50vh] flex justify-center items-center bg-gray-100 rounded border border-gray-200 overflow-hidden">
                   <img
                     src={getImageUrl(currentImage.path)}
@@ -242,7 +228,7 @@ export default function Labeling() {
                     className="max-w-full max-h-full object-contain origin-center"
                   />
                 </div>
-                {/* 2. Thanh trượt Zoom */}
+
                 <div className="mt-4 flex items-center gap-4 w-full max-w-md bg-gray-50 px-4 py-2 rounded border border-gray-200">
                   <ZoomOut className="w-4 h-4 text-gray-500" />
                   <input
@@ -263,7 +249,7 @@ export default function Labeling() {
                   </button>
                 </div>
               </div>
-              {/* Nút Lưu & Reset */}
+
               <div className="flex gap-3 mb-6">
                 <button
                   onClick={handleSaveLabel}
@@ -280,7 +266,6 @@ export default function Labeling() {
                 </button>
               </div>
 
-              {/* Manual Labels */}
               <div className="bg-white border border-gray-200 rounded p-5 shadow-sm">
                 <h2 className="font-bold mb-4 text-gray-800 text-lg">Gán nhãn thủ công</h2>
                 {!selectedProject || !selectedProject.labels || selectedProject.labels.length === 0 ? (
