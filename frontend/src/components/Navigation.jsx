@@ -1,5 +1,5 @@
-import { Link, useLocation } from 'react-router-dom'; 
-import { LayoutDashboard, Images, Users, Tag, Database, BarChart3, Menu, X, Tags, Folders } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom'; 
+import { LayoutDashboard, Images, Users, Tag, LogOut, BarChart3, Menu, X, Tags, Folders } from 'lucide-react';
 import { useState,} from 'react';
 const menuItems = [
   { icon: LayoutDashboard, label: 'Upload ảnh', path: '/dashboard' }, 
@@ -8,24 +8,28 @@ const menuItems = [
   { icon: Tags, label: 'Quản lý nhãn', path: '/label-management' },
   { icon: Folders, label: 'Quản lý dự án', path: '/project-management' },
   { icon: Users, label: 'Quản lý người dùng', path: '/user-management' },
-  { icon: Database, label: 'Quản lý dữ liệu', path: '/data-management' },
   { icon: BarChart3, label: 'Thống kê', path: '/statistics' },
 ];
 export default function Navigation() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('user'); 
+    navigate('/login');
+  }
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  // Hook này tự động lấy thông tin user từ LocalStorage khi menu load lên
 const [userInfo] = useState(() => {
     const userStr = localStorage.getItem('user');
     if (userStr) {
       try {
-        return JSON.parse(userStr); // Nếu có user thì lấy luôn
+        return JSON.parse(userStr); 
       } catch (error) {
         console.error("Lỗi đọc thông tin user", error);
       }
     }
-    // Nếu không có hoặc bị lỗi thì trả về mặc định
-    return { username: 'Khách', role: 'user' }; 
+    return { username: '', role: '' };
   });
   return (
     <>
@@ -70,16 +74,27 @@ const [userInfo] = useState(() => {
             );
           })}
         </nav>
-        {/* User Info - Lấy data thật */}
+        {/* User Info & Logout */}
         <div className="p-4 border-t border-gray-200 bg-gray-50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
-              {userInfo.username.charAt(0).toUpperCase()}
-            </div>
-            <div className="text-sm overflow-hidden">
-              <div className="font-bold text-gray-800 truncate">{userInfo.username}</div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide">{userInfo.role}</div>
-            </div>
+          <div className="flex items-center justify-between gap-2"> 
+            {/* Thông tin user */}
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className=" text-white rounded-full flex-shrink-0 flex items-center justify-center font-bold">
+                {userInfo.username.charAt(0).toUpperCase()}
+              </div>
+              <div className="text-sm overflow-hidden">
+                <div className="font-bold text-gray-800 truncate">{userInfo.username}</div>
+                <div className="text-xs text-gray-500 uppercase tracking-wide">{userInfo.role}</div>
+              </div>
+            </div>        
+            {/* Nút Đăng xuất */}
+            <button
+              onClick={handleLogout}
+              className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors flex-shrink-0"
+              title="Đăng xuất"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </aside>

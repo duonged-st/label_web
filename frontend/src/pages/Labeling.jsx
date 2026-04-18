@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Navigation from '../components/Navigation';
+import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'; 
 export default function Labeling() {
   // State quản lý dữ liệu từ API
   const [projects, setProjects] = useState([]);
@@ -9,6 +10,7 @@ export default function Labeling() {
   const [selectedImageId, setSelectedImageId] = useState(null);
   const [selectedLabels, setSelectedLabels] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
   // Xử lý URL ảnh từ DB
   const getImageUrl = (path) => {
     if (!path) return '';
@@ -52,7 +54,7 @@ export default function Labeling() {
     const fetchImages = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`/api/images?projectId=${selectedProjectId}&limit=100`, {
+        const response = await fetch(`/api/images?projectId=${selectedProjectId}&limit=all`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
@@ -75,7 +77,8 @@ export default function Labeling() {
 
   const selectedProject = projects.find(p => p._id === selectedProjectId);
   const currentImage = images.find(img => img._id === selectedImageId);
-
+  const currentIndex = currentImage ? images.findIndex(img => img._id === selectedImageId) + 1 : 0;
+  const totalImages = images.length;
   // Tự động load nhãn cũ nếu ảnh đã được gán
   useEffect(() => {
     if (currentImage) {
@@ -84,6 +87,7 @@ export default function Labeling() {
           ? currentImage.finalLabels 
           : []
       );
+      setZoomLevel(1);
     }
   }, [selectedImageId, currentImage]);
 
@@ -185,12 +189,15 @@ export default function Labeling() {
                 ))
               )}
             </select>
+          </div>   
+          <div className="p-3 border-b border-gray-200 flex justify-between items-center">
+            <h2 className="font-bold text-sm text-gray-800">Image list</h2>
+            {totalImages > 0 && (
+              <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                {currentIndex} / {totalImages}
+              </span>
+            )}
           </div>
-          
-          <div className="p-3 border-b border-gray-200">
-            <h2 className="font-bold text-sm">Image list</h2>
-          </div>
-          
           {/* Danh sách ảnh */}
           <div className="p-2 overflow-y-auto flex-1">
             {images.map((image) => {
@@ -221,22 +228,42 @@ export default function Labeling() {
             <div className="max-w-4xl mx-auto">
               
               {/* Header */}
-              <h1 className="text-xl font-bold mb-4 text-gray-800">
+              <h className="text-xl font-bold mb-4 text-gray-800">
                 Classification of {getFileName(currentImage.path)}
-              </h1>
-
-              {/* Selected Image */}
-              <div className="bg-white border border-gray-200 rounded p-6 mb-6 shadow-sm">
-                <div className="flex justify-center">
+              </h>
+              {/* Ảnh lớn & Thanh Zoom */}
+              <div className="bg-white border border-gray-200 rounded p-6 mb-6 shadow-sm flex flex-col items-center">
+                {/* 1. Khung chứa ảnh (có overflow-hidden để không tràn viền) */}
+                <div className="relative w-full h-[50vh] flex justify-center items-center bg-gray-100 rounded border border-gray-200 overflow-hidden">
                   <img
                     src={getImageUrl(currentImage.path)}
                     alt={getFileName(currentImage.path)}
-                    className="max-w-full max-h-[50vh] object-contain border border-gray-200"
+                    style={{ transform: `scale(${zoomLevel})`, transition: 'transform 0.2s ease-in-out' }}
+                    className="max-w-full max-h-full object-contain origin-center"
                   />
                 </div>
+                {/* 2. Thanh trượt Zoom */}
+                <div className="mt-4 flex items-center gap-4 w-full max-w-md bg-gray-50 px-4 py-2 rounded border border-gray-200">
+                  <ZoomOut className="w-4 h-4 text-gray-500" />
+                  <input
+                    type="range" min="0.5" max="4" step="0.1"
+                    value={zoomLevel}
+                    onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+                    className="flex-1 h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                  />
+                  <ZoomIn className="w-4 h-4 text-gray-500" />
+                  <div className="w-12 text-right text-sm font-medium text-gray-700">
+                    {Math.round(zoomLevel * 100)}%
+                  </div>
+                  <button 
+                    onClick={() => setZoomLevel(1)} 
+                    className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-
-              {/* Control Buttons - Đúng 2 nút con yêu cầu đặt dưới ảnh */}
+              {/* Nút Lưu & Reset */}
               <div className="flex gap-3 mb-6">
                 <button
                   onClick={handleSaveLabel}

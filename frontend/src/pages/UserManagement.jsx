@@ -16,7 +16,7 @@ export default function UserManagement() {
   const [formUsername, setFormUsername] = useState('');
   const [formPassword, setFormPassword] = useState(''); // Mật khẩu chỉ dùng khi thêm mới
   const [formEmail, setFormEmail] = useState('');
-  const [formRole, setFormRole] = useState('User');
+  const [formRole, setFormRole] = useState('user');
   const [formDatasets, setFormDatasets] = useState([]);
 
   // Lấy dữ liệu khi vào trang
@@ -51,7 +51,7 @@ export default function UserManagement() {
     setFormUsername('');
     setFormPassword('');
     setFormEmail('');
-    setFormRole('User');
+    setFormRole('user');
     setFormDatasets([]);
     setShowModal(true);
   };
@@ -61,7 +61,7 @@ export default function UserManagement() {
     setEditingUser(user);
     setFormUsername(user.username || '');
     setFormEmail(user.email || '');
-    setFormRole(user.role || 'User');
+    setFormRole(String(user.role || 'user').toLowerCase());
     // Rút mảng _id từ danh sách dự án
     setFormDatasets((user.allowedProjects || []).map(p => p._id));
     setShowModal(true);
@@ -213,9 +213,9 @@ export default function UserManagement() {
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      user.role === 'Admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                      String(user.role || 'user').toLowerCase() === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
                     }`}>
-                      {user.role || 'User'}
+                      {String(user.role || 'user').toLowerCase() === 'admin' ? 'Admin' : 'User'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
@@ -304,8 +304,8 @@ export default function UserManagement() {
                   onChange={e => setFormRole(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded focus:border-blue-500 outline-none"
                 >
-                  <option value="User">User (Chỉ thao tác)</option>
-                  <option value="Admin">Admin (Quản lý toàn quyền)</option>
+                  <option value="user">User (Chỉ thao tác)</option>
+                  <option value="admin">Admin (Quản lý toàn quyền)</option>
                 </select>
               </div>
 

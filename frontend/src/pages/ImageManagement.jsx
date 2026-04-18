@@ -1,23 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import Navigation from '../components/Navigation';
 import { Search, Loader2 } from 'lucide-react';
-
 export default function ImageManagement() {
-  // --- STATES QUẢN LÝ DỮ LIỆU THẬT ---
   const [images, setImages] = useState([]);
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [stats, setStats] = useState({ total: 0, labeled: 0, unlabeled: 0 });
-
-  // --- STATES LỌC & UI ---
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all' | 'Đã gán' | 'Chưa gán'
-  const [filterCategory, setFilterCategory] = useState('all'); // Lưu projectId
+  const [filterStatus, setFilterStatus] = useState('all'); 
+  const [filterCategory, setFilterCategory] = useState('all');
   const [selectedImages, setSelectedImages] = useState([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // 1. Lấy danh sách Dự án (để làm bộ lọc Category)
+  // 1. Lấy danh sách Dự án
   useEffect(() => {
     const fetchProjects = async () => {
       try {
@@ -36,27 +32,21 @@ export default function ImageManagement() {
     fetchProjects();
   }, []);
 
-  // 2. Lấy danh sách Ảnh (Gọi API thật từ image.js)
+  // 2. Lấy danh sách Ảnh
   const fetchImages = async () => {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      // Xây dựng URL động dựa trên bộ lọc
       let url = `/api/images?page=${page}&limit=20`;
       if (filterCategory !== 'all') url += `&projectId=${filterCategory}`;
       if (filterStatus !== 'all') url += `&status=${filterStatus}`;
-
       const response = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      
       if (response.ok) {
         const data = await response.json();
         setImages(data.images || []);
         setTotalPages(data.totalPages || 1);
-        
-        // Cập nhật thống kê nhanh (Backend trả về totalImages, ta tính nhẩm cho status)
-        // Nếu cần số liệu chính xác tuyệt đối thì phải viết thêm API đếm trên Backend
         setStats(prev => ({
           ...prev,
           total: data.totalImages
@@ -68,29 +58,22 @@ export default function ImageManagement() {
       setIsLoading(false);
     }
   };
-
-  // Cứ khi nào đổi bộ lọc hoặc trang thì gọi lại API
   useEffect(() => {
     fetchImages();
-    // Reset lựa chọn khi đổi bộ lọc
     setSelectedImages([]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, filterStatus, filterCategory]);
-
-  // 3. Xử lý UI Tìm kiếm (Lọc dữ liệu đã fetch ở Frontend)
   const displayedImages = images.filter(img => {
     const fileNameMatches = img.filename?.toLowerCase().includes(searchQuery.toLowerCase());
     const labelMatches = img.finalLabels?.some(label => label.toLowerCase().includes(searchQuery.toLowerCase()));
     return fileNameMatches || labelMatches;
   });
-
   // 4. Xử lý Checkbox chọn ảnh
   const toggleImageSelection = (id) => {
     setSelectedImages(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
   };
-
   // 5. Tính năng XÓA ẢNH thật trên Backend và MinIO
   const handleDeleteSelected = async () => {
     if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn ${selectedImages.length} ảnh này khỏi hệ thống?`)) return;
@@ -98,17 +81,15 @@ export default function ImageManagement() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      // Gọi API xóa từng ảnh (dựa theo image.js ông viết)
       await Promise.all(selectedImages.map(id => 
         fetch(`/api/images/${id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         })
       ));
-      
       alert('Đã xóa ảnh thành công!');
       setSelectedImages([]);
-      fetchImages(); // Tải lại danh sách
+      fetchImages(); 
     } catch (error) {
       console.error('Lỗi khi xóa ảnh:', error);
       alert('Có lỗi xảy ra khi xóa ảnh.');
@@ -116,7 +97,37 @@ export default function ImageManagement() {
       setIsLoading(false);
     }
   };
-
+  const handleDeleteAllByProject = async () => {
+    if (filterCategory === 'all') {
+      alert('Vui lòng chọn một dự án cụ thể trước khi xóa tất cả ảnh.');
+      return;
+    }
+    const selectedProject = projects.find((p) => p._id === filterCategory);
+    const projectName = selectedProject?.name || 'dự án đã chọn';
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa TOÀN BỘ ảnh của ${projectName}?`)) return;
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/images/project/${filterCategory}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.message || 'Không thể xóa toàn bộ ảnh của dự án này.');
+        return;
+      }
+      alert(data.message || 'Đã xóa toàn bộ ảnh của dự án.');
+      setSelectedImages([]);
+      setPage(1);
+      fetchImages();
+    } catch (error) {
+      console.error('Lỗi khi xóa toàn bộ ảnh theo dự án:', error);
+      alert('Có lỗi xảy ra khi xóa toàn bộ ảnh theo dự án.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
   // Định dạng ngày tháng
   const formatDate = (dateString) => {
     if (!dateString) return '';
@@ -124,20 +135,16 @@ export default function ImageManagement() {
       year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
     });
   };
-
   return (
     <div className="flex min-h-screen bg-gray-50">
-      <Navigation />
-      
+      <Navigation />  
       <main className="flex-1 p-6">
         <h1 className="text-2xl font-bold mb-6">Quản lý ảnh</h1>
-
         {/* Stats */}
         <div className="bg-white border border-gray-200 rounded p-4 mb-4 flex gap-6 text-sm">
           <div>Tổng số ảnh trong bộ lọc: <strong className="text-blue-600">{stats.total}</strong></div>
           <div className="text-gray-500 italic">*Chọn bộ lọc bên dưới để xem chi tiết</div>
         </div>
-
         {/* Filters */}
         <div className="bg-white border border-gray-200 rounded p-4 mb-4">
           <div className="flex flex-col md:flex-row gap-3 mb-3">
@@ -152,7 +159,6 @@ export default function ImageManagement() {
                 className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded focus:border-blue-500 outline-none"
               />
             </div>
-
             {/* Status Filter */}
             <select
               value={filterStatus}
@@ -163,8 +169,7 @@ export default function ImageManagement() {
               <option value="Đã gán">Đã gán nhãn</option>
               <option value="Chưa gán">Chưa gán nhãn</option>
             </select>
-
-            {/* Category (Project) Filter - Load từ DB */}
+            {/* Category*/}
             <select
               value={filterCategory}
               onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }}
@@ -176,7 +181,6 @@ export default function ImageManagement() {
               ))}
             </select>
           </div>
-
           {/* Actions */}
           <div className="flex gap-2">
             <button 
@@ -187,9 +191,16 @@ export default function ImageManagement() {
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
               Xóa ({selectedImages.length})
             </button>
+            <button
+              onClick={handleDeleteAllByProject}
+              className="px-4 py-2 bg-red-800 hover:bg-red-900 text-white rounded text-sm disabled:opacity-50 transition-colors"
+              disabled={filterCategory === 'all' || isLoading}
+              title={filterCategory === 'all' ? 'Hãy chọn dự án cụ thể để xóa toàn bộ ảnh' : 'Xóa toàn bộ ảnh của dự án đang chọn'}
+            >
+              Xóa tất cả theo dự án
+            </button>
           </div>
         </div>
-
         {/* Images Grid */}
         {isLoading ? (
           <div className="flex justify-center items-center py-20">
@@ -214,14 +225,12 @@ export default function ImageManagement() {
                       className="w-full h-full object-cover"
                       loading="lazy"
                     />
-                    
                     {/* Status Badge */}
                     <div className={`absolute top-2 right-2 px-2 py-1 rounded text-xs font-medium ${
                       image.status === 'Đã gán' ? 'bg-green-500 text-white shadow-sm' : 'bg-orange-500 text-white shadow-sm'
                     }`}>
                       {image.status}
                     </div>
-
                     {/* Checkbox */}
                     <input
                       type="checkbox"
@@ -231,7 +240,6 @@ export default function ImageManagement() {
                       onClick={(e) => e.stopPropagation()} // Tránh click đúp event
                     />
                   </div>
-
                   {/* Info */}
                   <div className="p-3">
                     <h3 className="font-medium text-sm mb-1 truncate" title={image.filename}>
@@ -240,7 +248,6 @@ export default function ImageManagement() {
                     <p className="text-xs text-gray-500 mb-2 truncate">
                       Dự án: <span className="font-medium text-gray-700">{image.projectId?.name || 'Không xác định'}</span>
                     </p>
-                    
                     {/* Render Labels nếu có */}
                     {image.finalLabels && image.finalLabels.length > 0 ? (
                       <div className="flex flex-wrap gap-1 mb-2">
@@ -255,8 +262,7 @@ export default function ImageManagement() {
                       </div>
                     ) : (
                       <div className="h-6 mb-2"></div> // Giữ layout không bị xô lệch
-                    )}
-                    
+                    )}  
                     <div className="text-xs text-gray-400 mt-2">
                       Upload: {formatDate(image.uploadDate || image.createdAt)}
                     </div>
@@ -264,7 +270,6 @@ export default function ImageManagement() {
                 </div>
               ))}
             </div>
-
             {/* Empty State */}
             {!isLoading && displayedImages.length === 0 && (
               <div className="bg-white border border-gray-200 rounded p-12 text-center">
@@ -273,7 +278,6 @@ export default function ImageManagement() {
                 <p className="text-sm text-gray-500">Thử thay đổi bộ lọc, trang hoặc tải thêm ảnh lên hệ thống.</p>
               </div>
             )}
-
             {/* Phân trang (Pagination) */}
             {totalPages > 1 && (
               <div className="flex justify-center items-center gap-4 mt-8">
