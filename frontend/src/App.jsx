@@ -8,6 +8,7 @@ import LabelManagement from './pages/LabelManagement';
 import ImageManagement from './pages/ImageManagement';
 import UserManagement from './pages/UserManagement';
 import Labeling from './pages/Labeling';
+import Statistics from './pages/Statistics';
 function App() {
   return (
     <Router>
@@ -44,6 +45,11 @@ function App() {
         <Route path="/user-management" element={
           <ProtectedRoutes adminOnly = {true}>
             <UserManagement />
+          </ProtectedRoutes>
+        } />
+        <Route path="/statistics" element={
+          <ProtectedRoutes adminOnly = {true}>
+            <Statistics />
           </ProtectedRoutes>
         } />
       </Routes>

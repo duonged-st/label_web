@@ -37,7 +37,7 @@ export default function ImageManagement() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      let url = `/api/images?page=${page}&limit=20`;
+      let url = `/api/images?page=${page}&limit=20&personal=true`;
       if (filterCategory !== 'all') url += `&projectId=${filterCategory}`;
       if (filterStatus !== 'all') url += `&status=${filterStatus}`;
       const response = await fetch(url, {

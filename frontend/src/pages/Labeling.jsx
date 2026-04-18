@@ -54,7 +54,7 @@ export default function Labeling() {
     const fetchImages = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`/api/images?projectId=${selectedProjectId}&limit=all`, {
+        const response = await fetch(`/api/images?projectId=${selectedProjectId}&limit=all&personal=true`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
