@@ -17,8 +17,11 @@ export default function Login() {
       const data = await response.json();
       if (response.ok) {
         alert('Đăng nhập thành công!');
+        const normalizedRole = String(data.role || 'user').toLowerCase();
+        const normalizedUsername = String(data.username || username || '').trim();
         localStorage.setItem('token', data.token);
-        localStorage.setItem('userRole', String(data.role || 'user').toLowerCase()); 
+        localStorage.setItem('userRole', normalizedRole);
+        localStorage.setItem('user', JSON.stringify({ username: normalizedUsername, role: normalizedRole }));
         Navigate('/dashboard');
       } else {
         alert(data.message); 

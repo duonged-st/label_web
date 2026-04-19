@@ -6,10 +6,10 @@ const menuItems = [
   { icon: LayoutDashboard, label: 'Upload ảnh', path: '/dashboard' }, 
   { icon: Images, label: 'Quản lý ảnh', path: '/image-management' },
   { icon: Tag, label: 'Gán nhãn', path: '/labeling' },
-  { icon: Tags, label: 'Quản lý nhãn', path: '/label-management' },
-  { icon: Folders, label: 'Quản lý dự án', path: '/project-management' },
-  { icon: Users, label: 'Quản lý người dùng', path: '/user-management' },
-  { icon: BarChart3, label: 'Thống kê', path: '/statistics' },
+  { icon: Tags, label: 'Quản lý nhãn', path: '/label-management', adminOnly: true },
+  { icon: Folders, label: 'Quản lý dự án', path: '/project-management', adminOnly: true },
+  { icon: Users, label: 'Quản lý người dùng', path: '/user-management', adminOnly: true },
+  { icon: BarChart3, label: 'Thống kê', path: '/statistics', adminOnly: true },
 ];
 export default function Navigation() {
   const location = useLocation();
@@ -33,6 +33,8 @@ export default function Navigation() {
     }
     return { username: '', role: '' };
   });
+  const currentRole = String(userInfo.role || localStorage.getItem('userRole') || '').toLowerCase();
+
   return (
     <>
       <button
@@ -55,7 +57,7 @@ export default function Navigation() {
           {menuItems.map((item, index) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
-            if (item.adminOnly && userInfo.role !== 'admin') return null;
+            if (item.adminOnly && currentRole !== 'admin') return null;
             return (
               <Link
                 key={`${item.label}-${index}`}

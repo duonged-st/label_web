@@ -28,6 +28,7 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   if (!payload || isTokenExpired(payload)) {
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
+    localStorage.removeItem('user');
     return <Navigate to="/login" replace />;
   }
   
