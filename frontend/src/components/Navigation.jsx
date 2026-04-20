@@ -50,9 +50,9 @@ export default function Navigation() {
         }`}
       >
         <div className="p-4 border-b border-gray-200 text-center">
+          <img src ="/logo-icon-transparent.png" alt="Logo" className="mx-auto mb-2 w-12 h-12" />
           <h1 className="text-xs text-gray-500"> Web gán nhãn dữ liệu</h1>
         </div>
-
         <nav className="flex-1 overflow-y-auto p-2">
           {menuItems.map((item, index) => {
             const Icon = item.icon;
@@ -67,8 +67,7 @@ export default function Navigation() {
                   isActive
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
+                }`}>
                 <Icon className="w-5 h-5" />
                 <span>{item.label}</span>
               </Link>

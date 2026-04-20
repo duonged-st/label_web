@@ -48,7 +48,7 @@ function App() {
           </ProtectedRoutes>
         } />
         <Route path="/statistics" element={
-          <ProtectedRoutes adminOnly = {true}>
+          <ProtectedRoutes adminOnly = {true} >
             <Statistics />
           </ProtectedRoutes>
         } />
