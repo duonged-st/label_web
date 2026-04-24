@@ -5,6 +5,19 @@ export default function ImageManagement() {
   const [images, setImages] = useState([]);
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentRole] = useState(() => {
+    try {
+      const userRaw = localStorage.getItem('user');
+      if (userRaw) {
+        const parsed = JSON.parse(userRaw);
+        if (parsed?.role) return String(parsed.role).toLowerCase();
+      }
+    } catch (error) {
+      console.error('Lỗi đọc quyền người dùng:', error);
+    }
+
+    return String(localStorage.getItem('userRole') || '').toLowerCase();
+  });
   const [stats, setStats] = useState({ total: 0, labeled: 0, unlabeled: 0 });
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); 
@@ -12,6 +25,7 @@ export default function ImageManagement() {
   const [selectedImages, setSelectedImages] = useState([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const isAdmin = currentRole === 'admin';
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -182,24 +196,26 @@ export default function ImageManagement() {
             </select>
           </div>
 
-          <div className="flex gap-2">
-            <button 
-              onClick={handleDeleteSelected}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm disabled:opacity-50 transition-colors"
-              disabled={selectedImages.length === 0 || isLoading}
-            >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
-              Xóa ({selectedImages.length})
-            </button>
-            <button
-              onClick={handleDeleteAllByProject}
-              className="px-4 py-2 bg-red-800 hover:bg-red-900 text-white rounded text-sm disabled:opacity-50 transition-colors"
-              disabled={filterCategory === 'all' || isLoading}
-              title={filterCategory === 'all' ? 'Hãy chọn dự án cụ thể để xóa toàn bộ ảnh' : 'Xóa toàn bộ ảnh của dự án đang chọn'}
-            >
-              Xóa tất cả theo dự án
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="flex gap-2">
+              <button 
+                onClick={handleDeleteSelected}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm disabled:opacity-50 transition-colors"
+                disabled={selectedImages.length === 0 || isLoading}
+              >
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
+                Xóa ({selectedImages.length})
+              </button>
+              <button
+                onClick={handleDeleteAllByProject}
+                className="px-4 py-2 bg-red-800 hover:bg-red-900 text-white rounded text-sm disabled:opacity-50 transition-colors"
+                disabled={filterCategory === 'all' || isLoading}
+                title={filterCategory === 'all' ? 'Hãy chọn dự án cụ thể để xóa toàn bộ ảnh' : 'Xóa toàn bộ ảnh của dự án đang chọn'}
+              >
+                Xóa tất cả theo dự án
+              </button>
+            </div>
+          )}
         </div>
 
         {isLoading ? (
