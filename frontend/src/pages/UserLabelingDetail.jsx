@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
-import { ArrowLeft, Loader2, Search } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Search } from 'lucide-react';
 
 export default function UserLabelingDetail() {
   const { userId } = useParams();
@@ -11,7 +11,40 @@ export default function UserLabelingDetail() {
     evaluations: []
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const handleExportUserCSV = async () => {
+    try {
+      setIsExporting(true);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/export/user/${userId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        alert(errorData.message || 'Lỗi khi xuất file CSV!');
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = String(data.userName || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+      a.download = `User_${safeName}_Labeling.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Lỗi xuất CSV theo người dùng:', error);
+      alert('Không thể tải file lúc này!');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   useEffect(() => {
     const fetchUserDetail = async () => {
@@ -64,7 +97,8 @@ export default function UserLabelingDetail() {
 
       <main className="flex-1 p-6 overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-4">
           <button
             onClick={() => navigate('/statistics')}
             className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -74,6 +108,15 @@ export default function UserLabelingDetail() {
             <span>Quay lại</span>
           </button>
           <h1 className="text-2xl font-bold text-gray-800">Chi tiết gán nhãn: {data.userName}</h1>
+          </div>
+          <button
+            onClick={handleExportUserCSV}
+            disabled={isExporting}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded text-sm font-medium transition-colors disabled:opacity-60"
+          >
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            Xuất dữ liệu CSV
+          </button>
         </div>
 
         {/* Stats Summary */}
