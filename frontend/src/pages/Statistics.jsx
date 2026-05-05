@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 import { Download, Loader2 } from 'lucide-react';
 
 export default function Statistics() {
+  const navigate = useNavigate();
   const [data, setData] = useState({
     totalLabeledImages: 0,
     userStatistics: [],
@@ -100,17 +102,27 @@ export default function Statistics() {
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Người dùng</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Đã gán</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Đã gán / Được phân</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Năng suất</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.userStatistics.length === 0 ? (
-                    <tr><td colSpan="2" className="text-center py-4 text-gray-500">Chưa có dữ liệu</td></tr>
+                    <tr><td colSpan="3" className="text-center py-4 text-gray-500">Chưa có dữ liệu</td></tr>
                   ) : (
                     data.userStatistics.map((user, index) => (
                       <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium text-gray-800">{user.userName}</td>
-                        <td className="px-4 py-3 text-right font-bold text-blue-600">{user.totalLabeled}</td>
+                        <td 
+                          onClick={() => navigate(`/user-labeling-detail/${user.userId}`)}
+                          className="px-4 py-3 text-right font-bold text-blue-600 cursor-pointer hover:underline transition-colors"
+                          title="Bấm để xem chi tiết"
+                        >
+                          {user.totalLabeled}/{user.totalAssigned}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-green-600">
+                          {user.productivityPercent}%
+                        </td>
                       </tr>
                     ))
                   )}
@@ -147,14 +159,12 @@ export default function Statistics() {
                       <p className="text-xl font-bold text-orange-700">{project.unlabeledImages}</p>
                     </div>
                   </div>
-
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-5 overflow-hidden">
                     <div 
                       className="bg-green-500 h-2 rounded-full transition-all duration-500" 
                       style={{ width: `${project.totalImages > 0 ? (project.labeledImages / project.totalImages) * 100 : 0}%` }}
                     />
                   </div>
-
                   <div className="mb-5">
                     <p className="text-sm font-semibold text-gray-700 mb-2">Tỉ lệ phân bổ nhãn đã gán:</p>
                     {project.labelDistribution.length === 0 ? (
@@ -171,7 +181,6 @@ export default function Statistics() {
                       </div>
                     )}
                   </div>
-
                   <div className="pt-4 border-t border-gray-100 flex justify-end">
                     <button 
                       onClick={() => handleExportCSV(project._id, project.name)}
@@ -181,7 +190,6 @@ export default function Statistics() {
                       Xuất dữ liệu CSV
                     </button>
                   </div>
-
                 </div>
               ))
             )}

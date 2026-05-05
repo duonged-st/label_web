@@ -9,6 +9,7 @@ import ImageManagement from './pages/ImageManagement';
 import UserManagement from './pages/UserManagement';
 import Labeling from './pages/Labeling';
 import Statistics from './pages/Statistics';
+import UserLabelingDetail from './pages/UserLabelingDetail';
 function App() {
   return (
     <Router>
@@ -50,6 +51,11 @@ function App() {
         <Route path="/statistics" element={
           <ProtectedRoutes adminOnly = {true} >
             <Statistics />
+          </ProtectedRoutes>
+        } />
+        <Route path="/user-labeling-detail/:userId" element={
+          <ProtectedRoutes adminOnly = {true} >
+            <UserLabelingDetail />
           </ProtectedRoutes>
         } />
       </Routes>
