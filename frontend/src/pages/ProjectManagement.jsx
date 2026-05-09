@@ -28,7 +28,13 @@ const normalizeRatiosFromProject = (project) => {
 
 const buildParts = (project, ratios) => {
   const totalImages = Number(project?.imageCount || 0);
-  if (!totalImages || !isValidRatios(ratios)) return [];
+  if (!totalImages) return [];
+  
+  const validRatios = Array.isArray(ratios) && ratios.length > 0 && 
+    ratios.every((r) => Number.isInteger(Number(r)) && Number(r) >= 1 && Number(r) <= 100) &&
+    ratios.reduce((s, r) => s + Number(r), 0) === 100;
+  
+  if (!validRatios) return [];
 
   const parts = [];
   let start = 1;
@@ -68,6 +74,22 @@ const computeEvenSplit = (n) => {
   return arr;
 };
 
+const computeSplitByImageCount = (totalImages, imagesPerPart) => {
+  const ipp = Math.max(1, Number(imagesPerPart) || 100);
+  const numParts = Math.ceil(totalImages / ipp);
+  if (numParts > 100) return null; 
+  const base = Math.floor(100 / numParts);
+  const arr = Array(numParts).fill(base);
+  let remaining = 100 - arr.reduce((s, v) => s + v, 0);
+  let i = 0;
+  while (remaining > 0) {
+    arr[i % numParts] += 1;
+    remaining -= 1;
+    i += 1;
+  }
+  return arr;
+};
+
 const getUserProjectPermission = (user, projectId) => {
   const permissions = Array.isArray(user?.projectPermissions) ? user.projectPermissions : [];
   return permissions.find((entry) => String(entry.projectId?._id || entry.projectId) === String(projectId)) || null;
@@ -91,11 +113,15 @@ export default function ProjectManagement() {
   const [selectedPartIds, setSelectedPartIds] = useState([]);
   const [isSavingSplit, setIsSavingSplit] = useState(false);
   const [isSavingAccess, setIsSavingAccess] = useState(false);
+  const [splitMode, setSplitMode] = useState('percentage'); // 'percentage' | 'imageCount'
+  const [imagesPerPart, setImagesPerPart] = useState(100);
 
   const selectedProject = datasets.find((dataset) => dataset._id === selectedProjectId) || null;
   const selectedUser = users.find((user) => user._id === selectedUserId) || null;
   const splitSum = splitRatiosDraft.reduce((sum, ratio) => sum + Number(ratio || 0), 0);
-  const ratiosAreValid = isValidRatios(splitRatiosDraft);
+  const ratiosAreValid = splitMode === 'percentage' 
+    ? isValidRatios(splitRatiosDraft) 
+    : Array.isArray(splitRatiosDraft) && splitRatiosDraft.length > 0 && splitRatiosDraft.reduce((s, r) => s + Number(r), 0) === 100;
 
   const projectParts = useMemo(
     () => buildParts(selectedProject, splitRatiosDraft),
@@ -179,8 +205,15 @@ export default function ProjectManagement() {
       setSplitRatiosDraft([100]);
       return;
     }
-    setSplitRatiosDraft(normalizeRatiosFromProject(selectedProject));
-  }, [selectedProject]);
+    if (splitMode === 'imageCount') {
+      const computed = computeSplitByImageCount(selectedProject.imageCount, imagesPerPart);
+      if (computed) {
+        setSplitRatiosDraft(computed);
+      }
+    } else {
+      setSplitRatiosDraft(normalizeRatiosFromProject(selectedProject));
+    }
+  }, [selectedProject, splitMode, imagesPerPart]);
 
   useEffect(() => {
     if (!selectedProject || !selectedUser) {
@@ -323,11 +356,19 @@ export default function ProjectManagement() {
     setSplitRatiosDraft((prev) => prev.map((ratio, itemIndex) => (itemIndex === index ? nextValue : Number(ratio))));
   };
 
+  const handleChangeImageCountMode = (e) => {
+    const newIpp = Math.max(1, Number(e.target.value) || 100);
+    setImagesPerPart(newIpp);
+  };
+
   const handleSaveSplit = async () => {
     if (!selectedProject) return;
 
     if (!ratiosAreValid) {
-      alert('Tỉ lệ chưa hợp lệ. Mỗi phần phải là bội số 10 và tổng phải bằng 100%.');
+      const msg = splitMode === 'percentage'
+        ? 'Tỉ lệ chưa hợp lệ. Mỗi phần phải là bội số 10 và tổng phải bằng 100%.'
+        : 'Không đủ ảnh để chia theo số lượng yêu cầu.';
+      alert(msg);
       return;
     }
 
@@ -569,15 +610,56 @@ export default function ProjectManagement() {
 
           <div className="space-y-6">
             <div className="bg-white border border-gray-200 rounded p-4">
-              <div className="flex items-center gap-2 mb-4">
-                <SplitSquareHorizontal className="w-5 h-5 text-blue-600" />
-                <h2 className="font-bold">Cấu hình tỉ lệ theo phần</h2>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <SplitSquareHorizontal className="w-5 h-5 text-blue-600" />
+                  <h2 className="font-bold">Cấu hình tỉ lệ theo phần</h2>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSplitMode('percentage')}
+                    className={`px-3 py-1 text-sm rounded transition-colors ${
+                      splitMode === 'percentage'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Theo %
+                  </button>
+                  <button
+                    onClick={() => setSplitMode('imageCount')}
+                    className={`px-3 py-1 text-sm rounded transition-colors ${
+                      splitMode === 'imageCount'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Theo số ảnh
+                  </button>
+                </div>
               </div>
 
               {!selectedProject ? (
                 <p className="text-sm text-gray-500 italic">Chọn một dự án ở bên trái để cấu hình chia phần.</p>
               ) : (
                 <div className="space-y-4">
+                  {splitMode === 'imageCount' && (
+                    <div className="bg-blue-50 border border-blue-200 rounded p-3">
+                      <label className="block text-sm font-medium text-blue-900 mb-2">Số ảnh trên mỗi phần</label>
+                      <input
+                        type="number"
+                        value={imagesPerPart}
+                        onChange={handleChangeImageCountMode}
+                        min="1"
+                        className="w-full px-3 py-2 border border-blue-300 rounded focus:outline-none focus:border-blue-500"
+                        placeholder="Nhập số ảnh mỗi phần (vd: 100)"
+                      />
+                      <p className="text-xs text-blue-700 mt-2">
+                        Sẽ tạo {splitRatiosDraft.length} phần với khoảng {Math.ceil((selectedProject.imageCount || 0) / imagesPerPart)} ảnh/phần
+                      </p>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-gray-500 text-xs uppercase mb-1">Tổng ảnh</div>
@@ -594,7 +676,7 @@ export default function ProjectManagement() {
                   </div>
 
                   <div className="space-y-2">
-                    {splitRatiosDraft.map((ratio, index) => (
+                    {splitMode === 'percentage' && splitRatiosDraft.map((ratio, index) => (
                       <div key={`ratio-${index}`} className="flex items-center gap-2">
                         <span className="text-sm text-gray-700 w-20">Phần {index + 1}</span>
                         <select
@@ -617,27 +699,29 @@ export default function ProjectManagement() {
                     ))}
                   </div>
 
-                  <div className="flex justify-between items-center">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleAddRatioPart}
-                        className="inline-flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-700 rounded hover:bg-blue-50"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Thêm phần
-                      </button>
-                      <button
-                        onClick={handleEvenSplit}
-                        className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
-                        title="Chia đều các phần hiện tại"
-                      >
-                        Chia đều
-                      </button>
+                  {splitMode === 'percentage' && (
+                    <div className="flex justify-between items-center">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleAddRatioPart}
+                          className="inline-flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-700 rounded hover:bg-blue-50"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Thêm phần
+                        </button>
+                        <button
+                          onClick={handleEvenSplit}
+                          className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
+                          title="Chia đều các phần hiện tại"
+                        >
+                          Chia đều
+                        </button>
+                      </div>
+                      {!ratiosAreValid && (
+                        <span className="text-xs text-orange-700">Tổng tỉ lệ phải bằng 100% (mỗi phần bước 10%).</span>
+                      )}
                     </div>
-                    {!ratiosAreValid && (
-                      <span className="text-xs text-orange-700">Tổng tỉ lệ phải bằng 100% (mỗi phần bước 10%).</span>
-                    )}
-                  </div>
+                  )}
 
                   <div className="bg-gray-50 border border-gray-200 rounded p-3">
                     <div className="text-sm font-medium mb-2 text-gray-700">Xem trước phần ảnh từ trên xuống</div>
