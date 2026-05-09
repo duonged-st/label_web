@@ -156,6 +156,28 @@ export default function Labeling() {
     }
   };
 
+  const getSelectedLabelStyle = (label) => {
+    const index = selectedLabels.indexOf(label);
+    if (index < 0) return null;
+    const maxFillOpacity = 0.24;
+    const minFillOpacity = 0.08;
+    const fillOpacity = selectedLabels.length <= 1
+      ? maxFillOpacity
+      : maxFillOpacity - ((maxFillOpacity - minFillOpacity) * index) / (selectedLabels.length - 1);
+
+    const maxBorderOpacity = 0.55;
+    const minBorderOpacity = 0.28;
+    const borderOpacity = selectedLabels.length <= 1
+      ? maxBorderOpacity
+      : maxBorderOpacity - ((maxBorderOpacity - minBorderOpacity) * index) / (selectedLabels.length - 1);
+
+    return {
+      backgroundColor: `rgba(37, 99, 235, ${fillOpacity.toFixed(3)})`,
+      borderColor: `rgba(37, 99, 235, ${borderOpacity.toFixed(3)})`,
+      color: '#1d4ed8'
+    };
+  };
+
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Navigation />
@@ -284,9 +306,10 @@ export default function Labeling() {
                         }}
                         className={`px-6 py-2.5 border rounded font-medium transition-colors ${
                           selectedLabels.includes(label)
-                            ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                            ? 'shadow-sm'
                             : 'border-gray-200 hover:bg-gray-50 text-gray-700'
                         }`}
+                        style={selectedLabels.includes(label) ? getSelectedLabelStyle(label) : undefined}
                       >
                         {label}
                       </button>

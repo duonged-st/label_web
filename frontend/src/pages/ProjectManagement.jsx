@@ -54,9 +54,28 @@ const buildParts = (project, ratios) => {
   return parts.filter((part) => part.start <= part.end);
 };
 
+const computeEvenSplit = (n) => {
+  const count = Math.max(1, Math.min(10, Number(n) || 1));
+  const base = Math.floor((100 / count) / 10) * 10 || 10;
+  const arr = Array(count).fill(base);
+  let remaining = 100 - arr.reduce((s, v) => s + v, 0);
+  let i = 0;
+  while (remaining > 0) {
+    arr[i % count] += 10;
+    remaining -= 10;
+    i += 1;
+  }
+  return arr;
+};
+
 const getUserProjectPermission = (user, projectId) => {
   const permissions = Array.isArray(user?.projectPermissions) ? user.projectPermissions : [];
   return permissions.find((entry) => String(entry.projectId?._id || entry.projectId) === String(projectId)) || null;
+};
+
+const userHasAllowedProject = (user, projectId) => {
+  const allowedProjects = Array.isArray(user?.allowedProjects) ? user.allowedProjects : [];
+  return allowedProjects.some((project) => String(project?._id || project) === String(projectId));
 };
 
 export default function ProjectManagement() {
@@ -82,6 +101,12 @@ export default function ProjectManagement() {
     () => buildParts(selectedProject, splitRatiosDraft),
     [selectedProject, splitRatiosDraft]
   );
+
+  const splitHasEmptyParts = useMemo(() => {
+    if (!selectedProject) return false;
+    if (!Array.isArray(splitRatiosDraft) || splitRatiosDraft.length === 0) return false;
+    return projectParts.length < splitRatiosDraft.length;
+  }, [selectedProject, splitRatiosDraft, projectParts]);
 
   const selectedUserPermission = selectedUser && selectedProject
     ? getUserProjectPermission(selectedUser, selectedProject._id)
@@ -165,8 +190,19 @@ export default function ProjectManagement() {
 
     const currentPermission = getUserProjectPermission(selectedUser, selectedProject._id);
     const currentPartIds = Array.isArray(currentPermission?.partIds) ? currentPermission.partIds.map(String) : [];
-    setSelectedPartIds(currentPartIds);
-  }, [selectedProject, selectedUser, users]);
+
+    if (currentPartIds.length > 0) {
+      setSelectedPartIds(currentPartIds);
+      return;
+    }
+
+    if (userHasAllowedProject(selectedUser, selectedProject._id) && normalizeRatiosFromProject(selectedProject).length <= 1) {
+      setSelectedPartIds(projectParts.map((part) => part.partId));
+      return;
+    }
+
+    setSelectedPartIds([]);
+  }, [selectedProject, selectedUser, users, projectParts]);
 
   const startEditing = (dataset) => {
     setEditingId(dataset._id);
@@ -216,7 +252,6 @@ export default function ProjectManagement() {
 
   const handleDeleteDataset = async (datasetId) => {
     if (!window.confirm('Bạn có chắc muốn xóa bộ dữ liệu này? Tất cả ảnh và nhãn sẽ bị xóa!')) return;
-
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/projects/${datasetId}`, {
@@ -270,6 +305,11 @@ export default function ProjectManagement() {
     setSplitRatiosDraft((prev) => [...prev, 10]);
   };
 
+  const handleEvenSplit = () => {
+    const n = splitRatiosDraft.length || 1;
+    setSplitRatiosDraft(computeEvenSplit(n));
+  };
+
   const handleRemoveRatioPart = (index) => {
     if (splitRatiosDraft.length <= 1) {
       alert('Phải có ít nhất một phần.');
@@ -288,6 +328,11 @@ export default function ProjectManagement() {
 
     if (!ratiosAreValid) {
       alert('Tỉ lệ chưa hợp lệ. Mỗi phần phải là bội số 10 và tổng phải bằng 100%.');
+      return;
+    }
+
+    if (splitHasEmptyParts) {
+      alert('Không đủ ảnh để chia theo cấu hình phần hiện tại. Vui lòng giảm số phần hoặc chọn "Chia đều".');
       return;
     }
 
@@ -394,6 +439,11 @@ export default function ProjectManagement() {
     if (!user || !project) return 'Chưa chọn';
     const permission = getUserProjectPermission(user, project._id);
     const parts = buildParts(project, normalizeRatiosFromProject(project));
+    const hasAllowedProject = userHasAllowedProject(user, project._id);
+
+    if (normalizeRatiosFromProject(project).length <= 1) {
+      return hasAllowedProject ? 'Toàn bộ dự án' : 'Chưa được cấp phần';
+    }
 
     if (!permission || !Array.isArray(permission.partIds) || permission.partIds.length === 0) {
       return 'Chưa được cấp phần';
@@ -568,13 +618,22 @@ export default function ProjectManagement() {
                   </div>
 
                   <div className="flex justify-between items-center">
-                    <button
-                      onClick={handleAddRatioPart}
-                      className="inline-flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-700 rounded hover:bg-blue-50"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Thêm phần
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleAddRatioPart}
+                        className="inline-flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-700 rounded hover:bg-blue-50"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Thêm phần
+                      </button>
+                      <button
+                        onClick={handleEvenSplit}
+                        className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
+                        title="Chia đều các phần hiện tại"
+                      >
+                        Chia đều
+                      </button>
+                    </div>
                     {!ratiosAreValid && (
                       <span className="text-xs text-orange-700">Tổng tỉ lệ phải bằng 100% (mỗi phần bước 10%).</span>
                     )}
@@ -584,6 +643,8 @@ export default function ProjectManagement() {
                     <div className="text-sm font-medium mb-2 text-gray-700">Xem trước phần ảnh từ trên xuống</div>
                     {projectParts.length === 0 ? (
                       <p className="text-sm text-gray-500 italic">{selectedProject.imageCount > 0 ? 'Cấu hình tỉ lệ chưa hợp lệ để tạo phần.' : 'Dự án này chưa có ảnh để chia phần.'}</p>
+                    ) : splitHasEmptyParts ? (
+                      <p className="text-sm text-red-600 italic">Không đủ ảnh để chia theo cấu hình phần hiện tại — một số phần sẽ rỗng.</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {projectParts.map((part) => (

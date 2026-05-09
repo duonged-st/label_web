@@ -96,7 +96,7 @@ export default function UserLabelingDetail() {
       <Navigation />
 
       <main className="flex-1 p-6 overflow-y-auto">
-        {/* Header */}
+      
         <div className="flex items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-4">
           <button
@@ -119,13 +119,12 @@ export default function UserLabelingDetail() {
           </button>
         </div>
 
-        {/* Stats Summary */}
         <div className="bg-white border border-gray-200 rounded p-4 mb-6 shadow-sm">
           <p className="text-sm font-medium text-gray-500 mb-2 uppercase tracking-wide">Tổng ảnh đã gán nhãn</p>
           <p className="text-3xl font-extrabold text-blue-600">{data.evaluations.length}</p>
         </div>
 
-        {/* Search */}
+
         <div className="bg-white border border-gray-200 rounded p-4 mb-6">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -139,7 +138,7 @@ export default function UserLabelingDetail() {
           </div>
         </div>
 
-        {/* Evaluations Grid */}
+     
         {filteredEvaluations.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded p-12 text-center">
             {data.evaluations.length === 0 ? (
@@ -157,7 +156,7 @@ export default function UserLabelingDetail() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredEvaluations.map((evaluation, index) => (
               <div key={index} className="bg-white border border-gray-200 rounded overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                {/* Image Preview */}
+        
                 <div className="relative aspect-square bg-gray-100">
                   <img
                     src={evaluation.path}
@@ -167,7 +166,6 @@ export default function UserLabelingDetail() {
                   />
                 </div>
 
-                {/* Info */}
                 <div className="p-3">
                   <h3 className="font-medium text-sm mb-2 truncate" title={evaluation.filename}>
                     {evaluation.filename}

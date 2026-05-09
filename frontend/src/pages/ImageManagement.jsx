@@ -22,10 +22,20 @@ export default function ImageManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); 
   const [filterCategory, setFilterCategory] = useState('all');
+  const [filterLabel, setFilterLabel] = useState('all');
   const [selectedImages, setSelectedImages] = useState([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const isAdmin = currentRole === 'admin';
+
+  const labelOptions = (() => {
+    const sourceProjects = filterCategory !== 'all'
+      ? projects.filter((project) => String(project._id) === String(filterCategory))
+      : projects;
+
+    const labels = sourceProjects.flatMap((project) => Array.isArray(project.labels) ? project.labels : []);
+    return Array.from(new Set(labels.map((label) => String(label).trim()).filter(Boolean)));
+  })();
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -52,6 +62,7 @@ export default function ImageManagement() {
       let url = `/api/images?page=${page}&limit=20&personal=true`;
       if (filterCategory !== 'all') url += `&projectId=${filterCategory}`;
       if (filterStatus !== 'all') url += `&status=${filterStatus}`;
+      if (filterLabel !== 'all') url += `&label=${encodeURIComponent(filterLabel)}`;
       const response = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -74,7 +85,7 @@ export default function ImageManagement() {
     fetchImages();
     setSelectedImages([]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, filterStatus, filterCategory]);
+  }, [page, filterStatus, filterCategory, filterLabel]);
 
   const displayedImages = images.filter(img => {
     const fileNameMatches = img.filename?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -186,12 +197,23 @@ export default function ImageManagement() {
 
             <select
               value={filterCategory}
-              onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }}
+              onChange={(e) => { setFilterCategory(e.target.value); setFilterLabel('all'); setPage(1); }}
               className="px-3 py-2 border border-gray-300 rounded outline-none max-w-xs"
             >
               <option value="all">Tất cả dự án</option>
               {projects.map(p => (
                 <option key={p._id} value={p._id}>{p.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={filterLabel}
+              onChange={(e) => { setFilterLabel(e.target.value); setPage(1); }}
+              className="px-3 py-2 border border-gray-300 rounded outline-none max-w-xs"
+            >
+              <option value="all">Tất cả nhãn</option>
+              {labelOptions.map((label) => (
+                <option key={label} value={label}>{label}</option>
               ))}
             </select>
           </div>

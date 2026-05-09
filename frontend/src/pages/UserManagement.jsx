@@ -58,7 +58,7 @@ export default function UserManagement() {
     setFormUsername(user.username || '');
     setFormEmail(user.email || '');
     setFormRole(String(user.role || 'user').toLowerCase());
-    setFormDatasets((user.allowedProjects || []).map(p => p._id));
+    setFormDatasets((user.allowedProjects || []).map((project) => String(project?._id || project)).filter(Boolean));
     setShowModal(true);
   };
 
