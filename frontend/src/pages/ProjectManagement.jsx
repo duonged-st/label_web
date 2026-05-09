@@ -26,10 +26,32 @@ const normalizeRatiosFromProject = (project) => {
   return [100];
 };
 
-const buildParts = (project, ratios) => {
+const buildParts = (project, ratios, splitMode = 'percentage', imagesPerPart = 100) => {
   const totalImages = Number(project?.imageCount || 0);
   if (!totalImages) return [];
-  
+
+  if (splitMode === 'imageCount') {
+    const ipp = Math.max(1, Number(imagesPerPart) || 100);
+    const parts = [];
+    let start = 1;
+
+    while (start <= totalImages) {
+      const end = Math.min(totalImages, start + ipp - 1);
+      const count = end - start + 1;
+      parts.push({
+        partId: String(parts.length + 1),
+        label: `Phần ${parts.length + 1}`,
+        start,
+        end,
+        ratio: Math.round((count / totalImages) * 100),
+        count
+      });
+      start = end + 1;
+    }
+
+    return parts;
+  }
+
   const validRatios = Array.isArray(ratios) && ratios.length > 0 && 
     ratios.every((r) => Number.isInteger(Number(r)) && Number(r) >= 1 && Number(r) <= 100) &&
     ratios.reduce((s, r) => s + Number(r), 0) === 100;
@@ -74,21 +96,6 @@ const computeEvenSplit = (n) => {
   return arr;
 };
 
-const computeSplitByImageCount = (totalImages, imagesPerPart) => {
-  const ipp = Math.max(1, Number(imagesPerPart) || 100);
-  const numParts = Math.ceil(totalImages / ipp);
-  if (numParts > 100) return null; 
-  const base = Math.floor(100 / numParts);
-  const arr = Array(numParts).fill(base);
-  let remaining = 100 - arr.reduce((s, v) => s + v, 0);
-  let i = 0;
-  while (remaining > 0) {
-    arr[i % numParts] += 1;
-    remaining -= 1;
-    i += 1;
-  }
-  return arr;
-};
 
 const getUserProjectPermission = (user, projectId) => {
   const permissions = Array.isArray(user?.projectPermissions) ? user.projectPermissions : [];
@@ -118,21 +125,28 @@ export default function ProjectManagement() {
 
   const selectedProject = datasets.find((dataset) => dataset._id === selectedProjectId) || null;
   const selectedUser = users.find((user) => user._id === selectedUserId) || null;
-  const splitSum = splitRatiosDraft.reduce((sum, ratio) => sum + Number(ratio || 0), 0);
-  const ratiosAreValid = splitMode === 'percentage' 
-    ? isValidRatios(splitRatiosDraft) 
-    : Array.isArray(splitRatiosDraft) && splitRatiosDraft.length > 0 && splitRatiosDraft.reduce((s, r) => s + Number(r), 0) === 100;
+  const ratiosAreValid = splitMode === 'percentage'
+    ? isValidRatios(splitRatiosDraft)
+    : Number.isInteger(Number(imagesPerPart)) && Number(imagesPerPart) > 0;
 
-  const projectParts = useMemo(
-    () => buildParts(selectedProject, splitRatiosDraft),
-    [selectedProject, splitRatiosDraft]
+  const percentageParts = useMemo(
+    () => buildParts(selectedProject, splitRatiosDraft, 'percentage', imagesPerPart),
+    [selectedProject, splitRatiosDraft, imagesPerPart]
   );
+
+  const imageCountParts = useMemo(
+    () => buildParts(selectedProject, [], 'imageCount', imagesPerPart),
+    [selectedProject, imagesPerPart]
+  );
+
+  const projectParts = splitMode === 'imageCount' ? imageCountParts : percentageParts;
 
   const splitHasEmptyParts = useMemo(() => {
     if (!selectedProject) return false;
+    if (splitMode === 'imageCount') return false;
     if (!Array.isArray(splitRatiosDraft) || splitRatiosDraft.length === 0) return false;
     return projectParts.length < splitRatiosDraft.length;
-  }, [selectedProject, splitRatiosDraft, projectParts]);
+  }, [selectedProject, splitRatiosDraft, projectParts, splitMode]);
 
   const selectedUserPermission = selectedUser && selectedProject
     ? getUserProjectPermission(selectedUser, selectedProject._id)
@@ -203,17 +217,21 @@ export default function ProjectManagement() {
   useEffect(() => {
     if (!selectedProject) {
       setSplitRatiosDraft([100]);
+      setSplitMode('percentage');
+      setImagesPerPart(100);
       return;
     }
-    if (splitMode === 'imageCount') {
-      const computed = computeSplitByImageCount(selectedProject.imageCount, imagesPerPart);
-      if (computed) {
-        setSplitRatiosDraft(computed);
-      }
+
+    setSplitRatiosDraft(normalizeRatiosFromProject(selectedProject));
+
+    if (selectedProject.imagesPerPart && selectedProject.imagesPerPart > 0) {
+      setSplitMode('imageCount');
+      setImagesPerPart(selectedProject.imagesPerPart);
     } else {
-      setSplitRatiosDraft(normalizeRatiosFromProject(selectedProject));
+      setSplitMode('percentage');
+      setImagesPerPart(100);
     }
-  }, [selectedProject, splitMode, imagesPerPart]);
+  }, [selectedProject]);
 
   useEffect(() => {
     if (!selectedProject || !selectedUser) {
@@ -229,7 +247,7 @@ export default function ProjectManagement() {
       return;
     }
 
-    if (userHasAllowedProject(selectedUser, selectedProject._id) && normalizeRatiosFromProject(selectedProject).length <= 1) {
+    if (userHasAllowedProject(selectedUser, selectedProject._id) && projectParts.length <= 1) {
       setSelectedPartIds(projectParts.map((part) => part.partId));
       return;
     }
@@ -367,7 +385,7 @@ export default function ProjectManagement() {
     if (!ratiosAreValid) {
       const msg = splitMode === 'percentage'
         ? 'Tỉ lệ chưa hợp lệ. Mỗi phần phải là bội số 10 và tổng phải bằng 100%.'
-        : 'Không đủ ảnh để chia theo số lượng yêu cầu.';
+        : 'Số ảnh/phần phải là số nguyên dương.';
       alert(msg);
       return;
     }
@@ -386,7 +404,11 @@ export default function ProjectManagement() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ splitRatios: splitRatiosDraft })
+        body: JSON.stringify(
+          splitMode === 'imageCount'
+            ? { imagesPerPart }
+            : { splitRatios: splitRatiosDraft, imagesPerPart: null }
+        )
       });
 
       const data = await response.json();
@@ -464,14 +486,24 @@ export default function ProjectManagement() {
   };
 
   const renderProjectPartSummary = (project) => {
-    const ratios = normalizeRatiosFromProject(project);
     if (!project || project.imageCount === 0) {
       return <span className="text-xs text-gray-400">Chưa có ảnh</span>;
     }
 
+    if (project.imagesPerPart && project.imagesPerPart > 0) {
+      const partCount = Math.ceil(project.imageCount / project.imagesPerPart);
+      return (
+        <span className="text-xs text-gray-500">
+          {partCount} phần • {project.imagesPerPart} ảnh/phần
+        </span>
+      );
+    }
+
+    const ratios = normalizeRatiosFromProject(project);
+
     return (
       <span className="text-xs text-gray-500">
-        {ratios.length} phần · {ratios.join(' / ')}
+        {ratios.length} phần • {ratios.map((ratio) => `${ratio}%`).join(' / ')}
       </span>
     );
   };
@@ -479,10 +511,15 @@ export default function ProjectManagement() {
   const renderPermissionSummary = (user, project) => {
     if (!user || !project) return 'Chưa chọn';
     const permission = getUserProjectPermission(user, project._id);
-    const parts = buildParts(project, normalizeRatiosFromProject(project));
+    const parts = buildParts(
+      project,
+      normalizeRatiosFromProject(project),
+      project.imagesPerPart ? 'imageCount' : 'percentage',
+      project.imagesPerPart || 100
+    );
     const hasAllowedProject = userHasAllowedProject(user, project._id);
 
-    if (normalizeRatiosFromProject(project).length <= 1) {
+    if (parts.length <= 1) {
       return hasAllowedProject ? 'Toàn bộ dự án' : 'Chưa được cấp phần';
     }
 
@@ -655,24 +692,26 @@ export default function ProjectManagement() {
                         placeholder="Nhập số ảnh mỗi phần (vd: 100)"
                       />
                       <p className="text-xs text-blue-700 mt-2">
-                        Sẽ tạo {splitRatiosDraft.length} phần với khoảng {Math.ceil((selectedProject.imageCount || 0) / imagesPerPart)} ảnh/phần
+                        Sẽ tạo {imageCountParts.length} phần với khoảng {imagesPerPart} ảnh/phần
                       </p>
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                  <div className={`grid grid-cols-1 ${splitMode === 'percentage' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-3 text-sm`}>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-gray-500 text-xs uppercase mb-1">Tổng ảnh</div>
                       <div className="font-bold text-lg">{selectedProject.imageCount || 0}</div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-gray-500 text-xs uppercase mb-1">Số phần</div>
-                      <div className="font-bold text-lg">{splitRatiosDraft.length}</div>
+                      <div className="font-bold text-lg">{projectParts.length}</div>
                     </div>
-                    <div className={`border rounded p-3 ${ratiosAreValid ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
-                      <div className="text-gray-500 text-xs uppercase mb-1">Tổng tỉ lệ</div>
-                      <div className={`font-bold text-lg ${ratiosAreValid ? 'text-green-700' : 'text-orange-700'}`}>{splitSum}%</div>
-                    </div>
+                    {splitMode === 'percentage' && (
+                      <div className={`border rounded p-3 ${ratiosAreValid ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
+                        <div className="text-gray-500 text-xs uppercase mb-1">Tổng tỉ lệ</div>
+                        <div className={`font-bold text-lg ${ratiosAreValid ? 'text-green-700' : 'text-orange-700'}`}>{splitRatiosDraft.reduce((sum, ratio) => sum + Number(ratio || 0), 0)}%</div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -733,7 +772,7 @@ export default function ProjectManagement() {
                       <div className="flex flex-wrap gap-2">
                         {projectParts.map((part) => (
                           <span key={part.partId} className="px-3 py-1 rounded-full bg-white border border-gray-200 text-sm text-gray-700">
-                            {part.label} ({part.ratio}%): {part.start}-{part.end}
+                            {part.label} {splitMode === 'imageCount' ? `(${part.count} ảnh)` : `(${part.ratio}%)`}: {part.start}-{part.end}
                           </span>
                         ))}
                       </div>
@@ -802,7 +841,7 @@ export default function ProjectManagement() {
                               className="w-4 h-4"
                             />
                             <span className="text-sm text-gray-700">
-                              {part.label} ({part.ratio}%): <span className="text-gray-500">{part.start}-{part.end}</span>
+                              {part.label} {splitMode === 'imageCount' ? `(${part.count} ảnh)` : `(${part.ratio}%)`}: <span className="text-gray-500">{part.start}-{part.end}</span>
                             </span>
                           </label>
                         ))}
