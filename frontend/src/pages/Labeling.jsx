@@ -83,7 +83,6 @@ export default function Labeling() {
           ? currentImage.finalLabels 
           : []
       );
-      setZoomLevel(1);
     }
   }, [selectedImageId, currentImage]);
 
