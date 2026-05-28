@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Navigation from '../components/Navigation';
 import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'; 
+import { getLabelStyleByPosition } from '../utils/labelStyle';
+import { shuffleWithSeed } from '../utils/seededShuffle';
 export default function Labeling() {
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -8,7 +10,8 @@ export default function Labeling() {
   const [selectedImageId, setSelectedImageId] = useState(null);
   const [selectedLabels, setSelectedLabels] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
+  const [zoomLevel, setZoomLevel] = useState(2);
+  const [shuffleSeed, setShuffleSeed] = useState('');
 
   const getImageUrl = (path) => {
     if (!path) return '';
@@ -24,6 +27,27 @@ export default function Labeling() {
   };
 
   useEffect(() => {
+    const fetchShuffleSeed = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/users/me/shuffle-seed', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setShuffleSeed(data.shuffleSeed || '');
+        } else {
+          setShuffleSeed('fallback-seed');
+        }
+      } catch (error) {
+        console.error('Lỗi lấy seed trộn ảnh:', error);
+        setShuffleSeed('fallback-seed');
+      }
+    };
+
+    fetchShuffleSeed();
+
     const fetchProjects = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -43,7 +67,7 @@ export default function Labeling() {
   }, []);
 
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!selectedProjectId || !shuffleSeed) {
       setImages([]);
       return;
     }
@@ -55,7 +79,7 @@ export default function Labeling() {
         });
         const data = await response.json();
         if (response.ok) {
-          const fetchedImages = data.images || [];
+          const fetchedImages = shuffleWithSeed(data.images || [], shuffleSeed);
           setImages(fetchedImages);
           if (fetchedImages.length > 0) {
             setSelectedImageId(fetchedImages[0]._id);
@@ -69,7 +93,7 @@ export default function Labeling() {
       }
     }; 
     fetchImages();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, shuffleSeed]);
 
   const selectedProject = projects.find(p => p._id === selectedProjectId);
   const currentImage = images.find(img => img._id === selectedImageId);
@@ -157,24 +181,7 @@ export default function Labeling() {
 
   const getSelectedLabelStyle = (label) => {
     const index = selectedLabels.indexOf(label);
-    if (index < 0) return null;
-    const maxFillOpacity = 0.24;
-    const minFillOpacity = 0.08;
-    const fillOpacity = selectedLabels.length <= 1
-      ? maxFillOpacity
-      : maxFillOpacity - ((maxFillOpacity - minFillOpacity) * index) / (selectedLabels.length - 1);
-
-    const maxBorderOpacity = 0.55;
-    const minBorderOpacity = 0.28;
-    const borderOpacity = selectedLabels.length <= 1
-      ? maxBorderOpacity
-      : maxBorderOpacity - ((maxBorderOpacity - minBorderOpacity) * index) / (selectedLabels.length - 1);
-
-    return {
-      backgroundColor: `rgba(37, 99, 235, ${fillOpacity.toFixed(3)})`,
-      borderColor: `rgba(37, 99, 235, ${borderOpacity.toFixed(3)})`,
-      color: '#1d4ed8'
-    };
+    return getLabelStyleByPosition(index, selectedLabels.length);
   };
 
   return (
@@ -263,7 +270,7 @@ export default function Labeling() {
                     {Math.round(zoomLevel * 100)}%
                   </div>
                   <button 
-                    onClick={() => setZoomLevel(1)} 
+                    onClick={() => setZoomLevel(2)} 
                     className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
                   >
                     <RotateCcw className="w-4 h-4" />

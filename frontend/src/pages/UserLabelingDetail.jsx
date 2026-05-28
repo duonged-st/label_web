@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 import { ArrowLeft, Download, Loader2, Search } from 'lucide-react';
+import { getLabelStyleByPosition } from '../utils/labelStyle';
 
 export default function UserLabelingDetail() {
   const { userId } = useParams();
@@ -79,6 +80,8 @@ export default function UserLabelingDetail() {
     const labelsMatch = evaluation.finalLabels?.some(label => label.toLowerCase().includes(searchQuery.toLowerCase()));
     return fileNameMatches || labelsMatch;
   });
+
+  const getEvaluationLabelStyle = (index, total) => getLabelStyleByPosition(index, total);
 
   if (isLoading) {
     return (
@@ -180,7 +183,8 @@ export default function UserLabelingDetail() {
                       {evaluation.finalLabels.map((label, idx) => (
                         <span
                           key={idx}
-                          className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded border border-green-200 font-medium"
+                          className="px-2 py-0.5 text-xs rounded border font-medium"
+                          style={getEvaluationLabelStyle(idx, evaluation.finalLabels.length)}
                         >
                           {label}
                         </span>
