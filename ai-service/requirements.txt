@@ -1,11 +1,19 @@
-# Requirements for ai-service/app.py
-# Optional: select the appropriate `torch` build for your environment (CPU or CUDA).
-# Example (CPU-only):
-#   pip install --index-url https://download.pytorch.org/whl/cpu torch
-
 Flask>=2.0
 minio>=7.0.0
-torch
+requests>=2.28.0
+Pillow>=9.0.0
 
-# Optional helpers you may add later:
-# ultralytics   # if you replace the fake loader with YOLO from ultralytics
+# numpy: TF 2.17 yêu cầu numpy<2.0.0 — pin cứng để tránh conflict
+numpy>=1.23.5,<2.0.0
+
+# ONNX Runtime GPU (dùng CUDA có sẵn trong base image)
+onnxruntime-gpu>=1.18.0
+
+# PyTorch CUDA 12.1 — tương thích với CUDA 12.x của TF base image
+# (YOLO/ultralytics sẽ tự dùng GPU thông qua torch)
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.1.0
+torchvision>=0.16.0
+
+# YOLO
+ultralytics>=8.0.0

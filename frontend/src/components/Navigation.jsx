@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'; 
-import { LayoutDashboard, Images, Users, Tag, LogOut, BarChart3, Menu, X, Tags, Folders } from 'lucide-react';
+import { LayoutDashboard, Images, Users, Tag, LogOut, BarChart3, Menu, X, Tags, Folders, BrainCircuit } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 const menuItems = [
@@ -8,6 +8,7 @@ const menuItems = [
   { icon: Tag, label: 'Gán nhãn', path: '/labeling' },
   { icon: Tags, label: 'Quản lý nhãn', path: '/label-management', adminOnly: true },
   { icon: Folders, label: 'Quản lý dự án', path: '/project-management', adminOnly: true },
+  { icon: BrainCircuit, label: 'Quản lý model', path: '/model-management', adminOnly: true },
   { icon: Users, label: 'Quản lý người dùng', path: '/user-management', adminOnly: true },
   { icon: BarChart3, label: 'Thống kê', path: '/statistics', adminOnly: true },
 ];

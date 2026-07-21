@@ -10,6 +10,7 @@ import UserManagement from './pages/UserManagement';
 import Labeling from './pages/Labeling';
 import Statistics from './pages/Statistics';
 import UserLabelingDetail from './pages/UserLabelingDetail';
+import ModelManagement from './pages/ModelManagement';
 function App() {
   return (
     <Router>
@@ -51,6 +52,11 @@ function App() {
         <Route path="/statistics" element={
           <ProtectedRoutes adminOnly = {true} >
             <Statistics />
+          </ProtectedRoutes>
+        } />
+        <Route path="/model-management" element={
+          <ProtectedRoutes adminOnly = {true} >
+            <ModelManagement />
           </ProtectedRoutes>
         } />
         <Route path="/user-labeling-detail/:userId" element={

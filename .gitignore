@@ -1,5 +1,11 @@
-mongo_data/*
-minio_data/*
+# --- RUNTIME DATA ---
+/mongo_data/
+/minio_data/
+
+# --- LOCAL MODEL/TEST ARTIFACTS ---
+/dummy_model.pt
+/test_labels.json
+
 # --- BACKEND ---
 backend/node_modules/
 backend/.env

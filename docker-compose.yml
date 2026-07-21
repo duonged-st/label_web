@@ -37,6 +37,17 @@ services:
       MINIO_ACCESS_KEY: admin
       MINIO_SECRET_KEY: admin123
       MINIO_BUCKET: aimodels
+      # Cho phép TF dùng GPU (comment dòng dưới nếu muốn CPU-only)
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all          # dùng tất cả GPU có sẵn
+              capabilities: [gpu]
+
   minio:
     image: minio/minio
     ports:
