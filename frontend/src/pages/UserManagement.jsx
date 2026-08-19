@@ -87,7 +87,7 @@ export default function UserManagement() {
       };
 
       if (isAddingNew) {
-        const response = await fetch('/api/register', {
+        const response = await fetch('/api/users', {
           method: 'POST',
           headers,
           body: JSON.stringify({ 

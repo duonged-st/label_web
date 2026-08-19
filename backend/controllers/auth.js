@@ -4,8 +4,8 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const User = require('../models/User');
-const Project = require('../models/Project');
-const { normalizeSplitRatios } = require('../utils/projectAccess');
+const { jwtSecret } = require('../config/security');
+const { validateAccountCredentials } = require('../utils/accountSecurity');
 const router = express.Router();
 
 const AUTH_LOG_DIR = path.join(__dirname, '..', 'logs');
@@ -54,37 +54,14 @@ const logAuthEvent = ({ type, username = 'unknown', role = 'unknown', reason = '
   appendAuthLogToFile(logLine);
 };
 
-const normalizeProjectIdList = (projectIds) => Array.from(new Set(
-  (Array.isArray(projectIds) ? projectIds : [])
-    .map((projectId) => String(projectId || '').trim())
-    .filter(Boolean)
-));
+router.post('/login', async (req, res) => {
+  const username = String(req.body?.username || '').trim();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
-const buildDefaultProjectPermissions = async (allowedProjectIds) => {
-  const normalizedAllowedProjectIds = normalizeProjectIdList(allowedProjectIds);
-  if (normalizedAllowedProjectIds.length === 0) {
-    return [];
+  if (!username || !password) {
+    return res.status(400).json({ message: 'Sai tên đăng nhập hoặc mật khẩu!' });
   }
 
-  const projects = await Project.find({ _id: { $in: normalizedAllowedProjectIds } })
-    .select('_id splitRatios splitPercent');
-
-  return projects.reduce((accumulator, project) => {
-    const ratios = normalizeSplitRatios(project.splitRatios, project.splitPercent || 100);
-    if (ratios.length <= 1) {
-      return accumulator;
-    }
-
-    accumulator.push({
-      projectId: project._id,
-      partIds: Array.from({ length: ratios.length }, (_, index) => String(index + 1))
-    });
-    return accumulator;
-  }, []);
-};
-
-router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
   try {
     const user = await User.findOne({ username });
     if (!user) {
@@ -96,8 +73,8 @@ router.post('/login', async (req, res) => {
     }
     const normalizeRole = String(user.role).toLowerCase(); 
     const token = jwt.sign(
-      { userId: user._id, role: normalizeRole }, 
-      process.env.JWT_SECRET || 'chuoi_bao_mat_cua_ban',
+      { userId: user._id, role: normalizeRole },
+      jwtSecret,
       { expiresIn: '1h' }
     );
     logAuthEvent({ type: 'LOGIN_SUCCESS', username: user.username, role: normalizeRole, req });
@@ -122,7 +99,7 @@ router.post('/auth-activity', async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'chuoi_bao_mat_cua_ban');
+    const decoded = jwt.verify(token, jwtSecret);
     const user = await User.findById(decoded.userId).select('username role');
 
     if (!user) {
@@ -146,31 +123,45 @@ router.post('/auth-activity', async (req, res) => {
 });
 
 router.post('/register', async (req, res) => {
-  const { username, password, role, allowedProjects } = req.body;
+  const hasPrivilegedFields = ['role', 'allowedProjects', 'projectPermissions']
+    .some((field) => Object.prototype.hasOwnProperty.call(req.body || {}, field));
+
+  if (hasPrivilegedFields) {
+    return res.status(400).json({
+      message: 'Đăng ký công khai không được phép tự cấp vai trò hoặc quyền dự án.'
+    });
+  }
+
+  const { username, password, error } = validateAccountCredentials(req.body);
+  if (error) {
+    return res.status(400).json({ message: error });
+  }
+
   try {
-    let user = await User.findOne({ username });
-    if (user) {
+    const existingUser = await User.findOne({ username }).select('_id');
+    if (existingUser) {
       return res.status(400).json({ message: 'Tên đăng nhập đã tồn tại!' });
     }
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-    const normalizedRole = String(role || 'user').toLowerCase();
-    const normalizedAllowedProjects = normalizeProjectIdList(allowedProjects);
-    const projectPermissions = await buildDefaultProjectPermissions(normalizedAllowedProjects);
 
-    user = new User({
+    const user = new User({
       username,
       password: hashedPassword,
-      role: normalizedRole,
-      allowedProjects: normalizedAllowedProjects,
-      projectPermissions
+      role: 'user',
+      allowedProjects: [],
+      projectPermissions: []
     });
+
     await user.save();
-    const normalizeRole = String(user.role).toLowerCase();
-    res.status(201).json({ message: 'Tạo tài khoản thành công!', role: normalizeRole });
-  } catch (error) { 
-    console.error("Chi tiết lỗi:", error); 
-    res.status(500).json({ message: 'Lỗi server' });
+    return res.status(201).json({ message: 'Tạo tài khoản thành công!', role: 'user' });
+  } catch (registerError) {
+    if (registerError?.code === 11000) {
+      return res.status(400).json({ message: 'Tên đăng nhập đã tồn tại!' });
+    }
+    console.error('Chi tiết lỗi đăng ký:', registerError);
+    return res.status(500).json({ message: 'Lỗi server' });
   }
 });
 module.exports = router;

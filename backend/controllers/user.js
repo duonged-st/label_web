@@ -1,8 +1,11 @@
 const express = require('express');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Project = require('../models/Project');
 const { normalizeSplitRatios } = require('../utils/projectAccess');
+const { validateAccountCredentials, normalizeManagedRole } = require('../utils/accountSecurity');
 const { verifyAdmin } = require('../middleware/authmiddleware');
 const router = express.Router();
 
@@ -11,6 +14,28 @@ const normalizeProjectIdList = (projectIds) => Array.from(new Set(
     .map((projectId) => String(projectId || '').trim())
     .filter(Boolean)
 ));
+
+const validateAllowedProjects = async (projectIds) => {
+  const normalizedProjectIds = normalizeProjectIdList(projectIds);
+  const invalidId = normalizedProjectIds.find((projectId) => !mongoose.isValidObjectId(projectId));
+
+  if (invalidId) {
+    return { error: 'Danh sách dự án chứa mã không hợp lệ.' };
+  }
+
+  if (normalizedProjectIds.length === 0) {
+    return { projectIds: [], error: null };
+  }
+
+  const existingProjectIds = await Project.find({ _id: { $in: normalizedProjectIds } })
+    .distinct('_id');
+
+  if (existingProjectIds.length !== normalizedProjectIds.length) {
+    return { error: 'Một hoặc nhiều dự án được cấp quyền không tồn tại.' };
+  }
+
+  return { projectIds: normalizedProjectIds, error: null };
+};
 
 const buildSyncedProjectPermissions = async (allowedProjectIds, existingPermissions = []) => {
   const normalizedAllowedProjectIds = normalizeProjectIdList(allowedProjectIds);
@@ -62,6 +87,55 @@ router.get('/users', verifyAdmin, async (req, res) => {
   }
 });
 
+router.post('/users', verifyAdmin, async (req, res) => {
+  const { username, password, error } = validateAccountCredentials(req.body);
+  if (error) {
+    return res.status(400).json({ message: error });
+  }
+
+  const normalizedRole = normalizeManagedRole(req.body?.role);
+  if (!normalizedRole) {
+    return res.status(400).json({ message: 'Vai trò chỉ có thể là user hoặc admin.' });
+  }
+
+  try {
+    const projectValidation = await validateAllowedProjects(req.body?.allowedProjects);
+    if (projectValidation.error) {
+      return res.status(400).json({ message: projectValidation.error });
+    }
+
+    const existingUser = await User.findOne({ username }).select('_id');
+    if (existingUser) {
+      return res.status(400).json({ message: 'Tên đăng nhập đã tồn tại!' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    const projectPermissions = await buildSyncedProjectPermissions(projectValidation.projectIds, []);
+
+    const createdUser = await User.create({
+      username,
+      password: hashedPassword,
+      role: normalizedRole,
+      allowedProjects: projectValidation.projectIds,
+      projectPermissions
+    });
+
+    const user = await User.findById(createdUser._id)
+      .select('-password')
+      .populate('allowedProjects', 'name')
+      .populate('projectPermissions.projectId', 'name splitPercent splitRatios');
+
+    return res.status(201).json({ message: 'Tạo tài khoản thành công!', user });
+  } catch (createError) {
+    if (createError?.code === 11000) {
+      return res.status(400).json({ message: 'Tên đăng nhập đã tồn tại!' });
+    }
+    console.error('Lỗi khi admin tạo user:', createError);
+    return res.status(500).json({ message: 'Lỗi server khi tạo người dùng' });
+  }
+});
+
 router.get('/users/me/shuffle-seed', async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('labelingShuffleSeed');
@@ -83,11 +157,18 @@ router.get('/users/me/shuffle-seed', async (req, res) => {
 });
 
 router.put('/users/:id', verifyAdmin, async (req, res) => {
-  const userId = req.params.id; 
-  const { role, allowedProjects } = req.body; 
+  const userId = req.params.id;
+  const { role, allowedProjects } = req.body;
   try {
-    const normalizedRole = String(role || 'user').toLowerCase();
-    const normalizedAllowedProjects = normalizeProjectIdList(allowedProjects);
+    const normalizedRole = normalizeManagedRole(role);
+    if (!normalizedRole) {
+      return res.status(400).json({ message: 'Vai trò chỉ có thể là user hoặc admin.' });
+    }
+
+    const projectValidation = await validateAllowedProjects(allowedProjects);
+    if (projectValidation.error) {
+      return res.status(400).json({ message: projectValidation.error });
+    }
 
     const existingUser = await User.findById(userId).select('projectPermissions');
     if (!existingUser) {
@@ -95,7 +176,7 @@ router.put('/users/:id', verifyAdmin, async (req, res) => {
     }
 
     const syncedProjectPermissions = await buildSyncedProjectPermissions(
-      normalizedAllowedProjects,
+      projectValidation.projectIds,
       existingUser.projectPermissions
     );
 
@@ -103,7 +184,7 @@ router.put('/users/:id', verifyAdmin, async (req, res) => {
       userId,
       {
         role: normalizedRole,
-        allowedProjects: normalizedAllowedProjects,
+        allowedProjects: projectValidation.projectIds,
         projectPermissions: syncedProjectPermissions
       },
       { new: true }

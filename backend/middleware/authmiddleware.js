@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { normalizeRole, hasProjectAccess, hasProjectPartAccess, getProjectPermissionEntry } = require('../utils/projectAccess');
+const { jwtSecret } = require('../config/security');
 
 const verifyToken = (req, res, next) => {
   const authHeader = req.header('Authorization');
@@ -9,7 +10,7 @@ const verifyToken = (req, res, next) => {
     return res.status(401).json({ message: 'Từ chối truy cập! Vui lòng đăng nhập.' });
   }
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'chuoi_bao_mat_cua_ban');
+    const decoded = jwt.verify(token, jwtSecret);
 
     User.findById(decoded.userId)
       .select('username role allowedProjects projectPermissions labelingShuffleSeed')

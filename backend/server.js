@@ -15,6 +15,13 @@ const exportRoutes = require('./controllers/export');
 const { verifyToken } = require('./middleware/authmiddleware');
 connectDB();
 
+const allowedOrigins = new Set(
+  String(process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+
 // Prevent stale API responses from browser/proxy caches.
 app.set('etag', false);
 app.use(express.json({ limit: '50mb' }));
@@ -25,7 +32,15 @@ app.use('/api', (req, res, next) => {
   res.set('Expires', '0');
   next();
 });
-app.use(cors());
+app.disable('x-powered-by');
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  }
+}));
 app.use('/api', authRoutes);
 app.use('/api', verifyToken);
 app.use('/api', imageRoutes);
