@@ -398,7 +398,7 @@ def _load_keras(path: str) -> ModelWrapper:
     if not TF_AVAILABLE or tf is None:
         raise RuntimeError(
             "TensorFlow chưa khả dụng. "
-            "Đảm bảo dùng base image tensorflow/tensorflow:*-gpu và cài đúng requirements."
+            "Đảm bảo dùng base image tensorflow/tensorflow:* và cài đúng requirements."
         )
     
     custom_objects = {}

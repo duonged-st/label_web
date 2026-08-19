@@ -1,10 +1,9 @@
-FROM tensorflow/tensorflow:2.17.0-gpu
+FROM tensorflow/tensorflow:2.17.0
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-# Tắt warning TF về GPU allocation (tùy chọn)
 ENV TF_CPP_MIN_LOG_LEVEL=2
 
 RUN apt-get update \
@@ -12,8 +11,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-# blinker 1.4 trong TF base image là distutils package → pip không thể gỡ bình thường
-# Phải force-reinstall riêng trước, sau đó cài phần còn lại bình thường
+# blinker 1.4 trong TF base image la distutils package, pip khong the go binh thuong.
+# Force-reinstall rieng truoc, sau do cai phan con lai binh thuong.
 RUN pip install --no-cache-dir --ignore-installed blinker \
     && pip install --no-cache-dir -r requirements.txt
 

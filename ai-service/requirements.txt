@@ -6,12 +6,10 @@ Pillow>=9.0.0
 # numpy: TF 2.17 yêu cầu numpy<2.0.0 — pin cứng để tránh conflict
 numpy>=1.23.5,<2.0.0
 
-# ONNX Runtime GPU (dùng CUDA có sẵn trong base image)
-onnxruntime-gpu>=1.18.0
+# ONNX Runtime CPU
+onnxruntime>=1.18.0
 
-# PyTorch CUDA 12.1 — tương thích với CUDA 12.x của TF base image
-# (YOLO/ultralytics sẽ tự dùng GPU thông qua torch)
---extra-index-url https://download.pytorch.org/whl/cu121
+# PyTorch CPU by default; GPU support can be added with a compose/Dockerfile override.
 torch>=2.1.0
 torchvision>=0.16.0
 

@@ -18,6 +18,7 @@ export default function Labeling() {
   const [aiSuggestions, setAiSuggestions] = useState([]);   // [{label, confidence}]
   const [isPredicting, setIsPredicting] = useState(false);
   const [aiModelInfo, setAiModelInfo] = useState(null);     // {id, name}
+  const [isAiModelLoaded, setIsAiModelLoaded] = useState(false);
   const [predictionError, setPredictionError] = useState('');
   const predictionAbortRef = useRef(null);
 
@@ -76,6 +77,7 @@ export default function Labeling() {
   useEffect(() => {
     setAiSuggestions([]);
     setPredictionError('');
+    setIsAiModelLoaded(false);
     const project = projects.find(p => p._id === selectedProjectId);
     if (project?.aiModelId) {
       const modelId = project.aiModelId._id || project.aiModelId;
@@ -85,6 +87,45 @@ export default function Labeling() {
       setAiModelInfo(null);
     }
   }, [selectedProjectId, projects]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkLoadedModel = async () => {
+      if (!aiModelInfo?.id) {
+        setIsAiModelLoaded(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/ai-models/${aiModelInfo.id}/status`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (cancelled) return;
+
+        const loaded = response.ok && Boolean(data.loaded);
+        setIsAiModelLoaded(loaded);
+        if (!loaded) {
+          setAiSuggestions([]);
+          setPredictionError('');
+        }
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Lỗi kiểm tra trạng thái model:', error);
+        setIsAiModelLoaded(false);
+        setAiSuggestions([]);
+        setPredictionError('');
+      }
+    };
+
+    checkLoadedModel();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [aiModelInfo?.id]);
 
   useEffect(() => {
     if (!selectedProjectId || !shuffleSeed) {
@@ -181,7 +222,12 @@ export default function Labeling() {
 
   // Trigger predict mỗi khi selectedImageId hoặc aiModelInfo thay đổi
   useEffect(() => {
-    if (!currentImage || !aiModelInfo) {
+    if (!currentImage || !aiModelInfo || !isAiModelLoaded) {
+      if (predictionAbortRef.current) {
+        predictionAbortRef.current.abort();
+        predictionAbortRef.current = null;
+      }
+      setIsPredicting(false);
       setAiSuggestions([]);
       setPredictionError('');
       return;
@@ -190,7 +236,7 @@ export default function Labeling() {
     const projectLabels = selectedProject?.labels || [];
     runPrediction(imageUrl, aiModelInfo.id, projectLabels);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedImageId, aiModelInfo]);
+  }, [selectedImageId, aiModelInfo, isAiModelLoaded]);
 
   const handleToggleSuggestion = (label) => {
     setSelectedLabels(prev =>
@@ -403,7 +449,7 @@ export default function Labeling() {
               </div>
 
               {/* AI Suggestions Panel */}
-              {aiModelInfo && (
+              {aiModelInfo && isAiModelLoaded && (
                 <div className="bg-white border border-gray-200 rounded p-5 shadow-sm mb-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">

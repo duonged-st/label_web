@@ -111,7 +111,8 @@ const putObjectSafe = async (objectName, filePath, fileSize) => {
   await minioClient.putObject(MINIO_BUCKET, objectName, fileStream, fileSize);
 };
 
-const callAiService = async (endpoint, payload) => {
+const callAiService = async (endpoint, payload, options = {}) => {
+  const method = String(options.method || 'POST').toUpperCase();
   // Try to use global fetch first, otherwise try dynamic import of node-fetch,
   // and as a last resort try axios (if installed).
   let fetchImpl = typeof global.fetch === 'function' ? global.fetch : null;
@@ -125,7 +126,9 @@ const callAiService = async (endpoint, payload) => {
         // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
         const axios = require('axios');
         const url = `${AI_SERVICE_URL}${endpoint}`;
-        const resp = await axios.post(url, payload, { headers: { 'Content-Type': 'application/json' } });
+        const resp = method === 'GET'
+          ? await axios.get(url)
+          : await axios.post(url, payload, { headers: { 'Content-Type': 'application/json' } });
         return { ok: true, status: resp.status, data: resp.data };
       } catch (err2) {
         console.error('No HTTP client available to call AI service:', err2 && err2.message ? err2.message : err2);
@@ -135,11 +138,16 @@ const callAiService = async (endpoint, payload) => {
   }
 
   try {
-    const response = await fetchImpl(`${AI_SERVICE_URL}${endpoint}`, {
-      method: 'POST',
+    const requestOptions = {
+      method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    };
+
+    if (method !== 'GET') {
+      requestOptions.body = JSON.stringify(payload);
+    }
+
+    const response = await fetchImpl(`${AI_SERVICE_URL}${endpoint}`, requestOptions);
 
     let data = null;
     try {
@@ -257,6 +265,32 @@ router.get('/ai-models', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Lỗi lấy danh sách ai model:', error);
     return res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+router.get('/ai-models/:id/status', verifyToken, async (req, res) => {
+  try {
+    const aiModel = await AiModel.findById(req.params.id);
+    if (!aiModel) {
+      return res.status(404).json({ loaded: false, message: 'Không tìm thấy AI model.' });
+    }
+
+    const result = await callAiService('/health', undefined, { method: 'GET' });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        loaded: false,
+        message: result.data?.message || 'Không thể kiểm tra trạng thái AI service.'
+      });
+    }
+
+    return res.status(200).json({
+      id: String(aiModel._id),
+      loaded: Boolean(result.data?.models?.[aiModel.minioPath]),
+      activeSlots: result.data?.active_slots || 0
+    });
+  } catch (error) {
+    console.error('Lỗi kiểm tra trạng thái ai model:', error);
+    return res.status(500).json({ loaded: false, message: 'Lỗi server' });
   }
 });
 
