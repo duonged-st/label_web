@@ -140,6 +140,18 @@ export default function ProjectManagement() {
   );
 
   const projectParts = splitMode === 'imageCount' ? imageCountParts : percentageParts;
+  const savedParts = useMemo(() => {
+    if (!selectedProject?.imageCount) return [];
+    const counts = selectedProject.partCounts || {};
+    const ids = selectedProject.imagesPerPart
+      ? Object.keys(counts)
+      : normalizeRatiosFromProject(selectedProject).map((_, index) => String(index + 1));
+    return ids.sort((a, b) => Number(a) - Number(b)).map((partId) => ({
+      partId,
+      label: `Phần ${partId}`,
+      count: counts[partId] || 0
+    }));
+  }, [selectedProject]);
 
   const splitHasEmptyParts = useMemo(() => {
     if (!selectedProject) return false;
@@ -161,18 +173,7 @@ export default function ProjectManagement() {
       const projectsData = await response.json();
 
       if (response.ok) {
-        const projectsWithCounts = await Promise.all(projectsData.map(async (project) => {
-          try {
-            const imgRes = await fetch(`/api/images?projectId=${project._id}&limit=1`, {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            const imgData = await imgRes.json();
-            return { ...project, imageCount: imgData.totalImages || 0 };
-          } catch (error) {
-            console.error(`Lỗi đếm ảnh cho dự án ${project._id}:`, error);
-            return { ...project, imageCount: 0 };
-          }
-        }));
+        const projectsWithCounts = projectsData;
 
         setDatasets(projectsWithCounts);
 
@@ -247,13 +248,13 @@ export default function ProjectManagement() {
       return;
     }
 
-    if (userHasAllowedProject(selectedUser, selectedProject._id) && projectParts.length <= 1) {
-      setSelectedPartIds(projectParts.map((part) => part.partId));
+    if (userHasAllowedProject(selectedUser, selectedProject._id) && savedParts.length <= 1) {
+      setSelectedPartIds(savedParts.map((part) => part.partId));
       return;
     }
 
     setSelectedPartIds([]);
-  }, [selectedProject, selectedUser, users, projectParts]);
+  }, [selectedProject, selectedUser, users, savedParts]);
 
   const startEditing = (dataset) => {
     setEditingId(dataset._id);
@@ -417,7 +418,9 @@ export default function ProjectManagement() {
         return;
       }
 
-      alert('Đã cập nhật cấu hình chia phần.');
+      alert(data.permissionsRevoked
+        ? 'Đã cập nhật cách chia ảnh. Quyền phần cũ đã được thu hồi; hãy cấp lại quyền cho người dùng.'
+        : 'Cấu hình chia phần không thay đổi.');
       await fetchProjects();
       await fetchUsers();
       setSelectedPartIds([]);
@@ -511,18 +514,12 @@ export default function ProjectManagement() {
   const renderPermissionSummary = (user, project) => {
     if (!user || !project) return 'Chưa chọn';
     const permission = getUserProjectPermission(user, project._id);
-    const parts = buildParts(
-      project,
-      normalizeRatiosFromProject(project),
-      project.imagesPerPart ? 'imageCount' : 'percentage',
-      project.imagesPerPart || 100
-    );
-    const hasAllowedProject = userHasAllowedProject(user, project._id);
-
-    if (parts.length <= 1) {
-      return hasAllowedProject ? 'Toàn bộ dự án' : 'Chưa được cấp phần';
-    }
-
+    const counts = project.partCounts || {};
+    const parts = project.imagesPerPart
+      ? Object.keys(counts).map((partId) => ({ partId, label: `Phần ${partId}`, count: counts[partId] }))
+      : normalizeRatiosFromProject(project).map((_, index) => ({
+          partId: String(index + 1), label: `Phần ${index + 1}`, count: counts[String(index + 1)] || 0
+        }));
     if (!permission || !Array.isArray(permission.partIds) || permission.partIds.length === 0) {
       return 'Chưa được cấp phần';
     }
@@ -530,7 +527,7 @@ export default function ProjectManagement() {
     const labels = permission.partIds
       .map((partId) => parts.find((part) => part.partId === String(partId)))
       .filter(Boolean)
-      .map((part) => `${part.label} (${part.start}-${part.end})`);
+      .map((part) => `${part.label} (${part.count} ảnh)`);
 
     return labels.length > 0 ? labels.join(', ') : 'Chưa được cấp phần';
   };
@@ -764,13 +761,13 @@ export default function ProjectManagement() {
 
                   <div className="bg-gray-50 border border-gray-200 rounded p-3">
                     <div className="text-sm font-medium mb-2 text-gray-700">Xem trước phần ảnh từ trên xuống</div>
-                    {projectParts.length === 0 ? (
+                    {savedParts.length === 0 ? (
                       <p className="text-sm text-gray-500 italic">{selectedProject.imageCount > 0 ? 'Cấu hình tỉ lệ chưa hợp lệ để tạo phần.' : 'Dự án này chưa có ảnh để chia phần.'}</p>
                     ) : splitHasEmptyParts ? (
                       <p className="text-sm text-red-600 italic">Không đủ ảnh để chia theo cấu hình phần hiện tại — một số phần sẽ rỗng.</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        {projectParts.map((part) => (
+                        {savedParts.map((part) => (
                           <span key={part.partId} className="px-3 py-1 rounded-full bg-white border border-gray-200 text-sm text-gray-700">
                             {part.label} {splitMode === 'imageCount' ? `(${part.count} ảnh)` : `(${part.ratio}%)`}: {part.start}-{part.end}
                           </span>
@@ -841,7 +838,7 @@ export default function ProjectManagement() {
                               className="w-4 h-4"
                             />
                             <span className="text-sm text-gray-700">
-                              {part.label} {splitMode === 'imageCount' ? `(${part.count} ảnh)` : `(${part.ratio}%)`}: <span className="text-gray-500">{part.start}-{part.end}</span>
+                              {part.label} ({part.count} ảnh)
                             </span>
                           </label>
                         ))}

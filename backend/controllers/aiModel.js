@@ -7,7 +7,10 @@ const { v4: uuidv4 } = require('uuid');
 const minio = require('minio');
 const AiModel = require('../models/AiModel');
 const Project = require('../models/Project');
-const { verifyAdmin, verifyToken } = require('../middleware/authmiddleware');
+const Image = require('../models/Image');
+const { verifyAdmin, verifyToken, normalizeRole, getProjectPermissionEntry } = require('../middleware/authmiddleware');
+const { getImagePartMap, getAccessibleProjectIds } = require('../utils/projectAccess');
+const { getImageObjectName } = require('../utils/imageFile');
 
 // Loại file được phép upload cho AI model
 const ACCEPTED_MODEL_EXTENSIONS = ['.pt', '.pth', '.onnx', '.pb', '.h5', '.keras', '.pkl', '.joblib', '.npy', '.safetensors', '.bin'];
@@ -15,6 +18,7 @@ const ACCEPTED_MODEL_EXTENSIONS = ['.pt', '.pth', '.onnx', '.pb', '.h5', '.keras
 const router = express.Router();
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://ai-service:5001';
+const AI_SERVICE_TOKEN = String(process.env.AI_SERVICE_TOKEN || '').trim();
 const MINIO_BUCKET = String(process.env.AI_MODEL_BUCKET || 'aimodels').trim() || 'aimodels';
 const normalizeMinioEndpoint = (value) => {
   const raw = String(value || 'minio').trim();
@@ -112,6 +116,9 @@ const putObjectSafe = async (objectName, filePath, fileSize) => {
 };
 
 const callAiService = async (endpoint, payload, options = {}) => {
+  if (AI_SERVICE_TOKEN.length < 32) {
+    return { ok: false, status: 503, data: { message: 'AI service chưa được cấu hình khóa truy cập an toàn.' } };
+  }
   const method = String(options.method || 'POST').toUpperCase();
   // Try to use global fetch first, otherwise try dynamic import of node-fetch,
   // and as a last resort try axios (if installed).
@@ -127,8 +134,8 @@ const callAiService = async (endpoint, payload, options = {}) => {
         const axios = require('axios');
         const url = `${AI_SERVICE_URL}${endpoint}`;
         const resp = method === 'GET'
-          ? await axios.get(url)
-          : await axios.post(url, payload, { headers: { 'Content-Type': 'application/json' } });
+          ? await axios.get(url, { headers: { 'X-AI-Service-Token': AI_SERVICE_TOKEN } })
+          : await axios.post(url, payload, { headers: { 'Content-Type': 'application/json', 'X-AI-Service-Token': AI_SERVICE_TOKEN } });
         return { ok: true, status: resp.status, data: resp.data };
       } catch (err2) {
         console.error('No HTTP client available to call AI service:', err2 && err2.message ? err2.message : err2);
@@ -140,7 +147,7 @@ const callAiService = async (endpoint, payload, options = {}) => {
   try {
     const requestOptions = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-AI-Service-Token': AI_SERVICE_TOKEN },
     };
 
     if (method !== 'GET') {
@@ -258,7 +265,7 @@ router.post('/ai-models/upload', verifyAdmin, upload.fields([
   }
 });
 
-router.get('/ai-models', verifyToken, async (req, res) => {
+router.get('/ai-models', verifyAdmin, async (req, res) => {
   try {
     const aiModels = await AiModel.find().sort({ createdAt: -1 });
     return res.status(200).json(aiModels);
@@ -273,6 +280,20 @@ router.get('/ai-models/:id/status', verifyToken, async (req, res) => {
     const aiModel = await AiModel.findById(req.params.id);
     if (!aiModel) {
       return res.status(404).json({ loaded: false, message: 'Không tìm thấy AI model.' });
+    }
+
+    if (normalizeRole(req.user.role) !== 'admin') {
+      const accessibleProjects = await Project.find({
+        aiModelId: aiModel._id,
+        _id: { $in: getAccessibleProjectIds(req.user) }
+      }).select('_id');
+      const hasAssignedPart = accessibleProjects.some((project) => {
+        const permission = getProjectPermissionEntry(req.user, project._id);
+        return Array.isArray(permission?.partIds) && permission.partIds.length > 0;
+      });
+      if (!hasAssignedPart) {
+        return res.status(403).json({ loaded: false, message: 'Bạn không có quyền xem model này.' });
+      }
     }
 
     const result = await callAiService('/health', undefined, { method: 'GET' });
@@ -294,7 +315,7 @@ router.get('/ai-models/:id/status', verifyToken, async (req, res) => {
   }
 });
 
-router.get('/ai-models/:id', verifyToken, async (req, res) => {
+router.get('/ai-models/:id', verifyAdmin, async (req, res) => {
   try {
     const aiModel = await AiModel.findById(req.params.id);
     if (!aiModel) {
@@ -398,7 +419,7 @@ router.delete('/ai-models/:id', verifyAdmin, async (req, res) => {
 });
 
 // Gọi AI service Flask để load model vào RAM/VRAM.
-router.post('/ai-models/:id/load', verifyToken, async (req, res) => {
+router.post('/ai-models/:id/load', verifyAdmin, async (req, res) => {
   try {
     const aiModel = await AiModel.findById(req.params.id);
     if (!aiModel) {
@@ -414,7 +435,7 @@ router.post('/ai-models/:id/load', verifyToken, async (req, res) => {
 });
 
 // Gọi AI service Flask để unload model khỏi RAM/VRAM.
-router.post('/ai-models/:id/unload', verifyToken, async (req, res) => {
+router.post('/ai-models/:id/unload', verifyAdmin, async (req, res) => {
   try {
     const aiModel = await AiModel.findById(req.params.id);
     if (!aiModel) {
@@ -432,29 +453,68 @@ router.post('/ai-models/:id/unload', verifyToken, async (req, res) => {
 // Gọi AI service Flask để predict nhãn cho ảnh.
 router.post('/ai-models/:id/predict', verifyToken, async (req, res) => {
   try {
-    const { imageUrl, classNames } = req.body;
+    const { imageId } = req.body || {};
+    if (!imageId) {
+      return res.status(400).json({ message: 'Thiếu imageId.' });
+    }
+
     const aiModel = await AiModel.findById(req.params.id);
     if (!aiModel) {
       return res.status(404).json({ message: 'Không tìm thấy AI model.' });
     }
 
-    if (!imageUrl) {
-      return res.status(400).json({ message: 'Thiếu imageUrl.' });
+    const image = await Image.findById(imageId);
+    if (!image) {
+      return res.status(404).json({ message: 'Không tìm thấy ảnh.' });
+    }
+
+    const project = await Project.findOne({ _id: image.projectId, aiModelId: aiModel._id })
+      .select('labels splitPercent splitRatios imagesPerPart');
+    if (!project) {
+      return res.status(403).json({ message: 'Model không được gán cho dự án của ảnh này.' });
+    }
+
+    if (normalizeRole(req.user.role) !== 'admin') {
+      const permission = getProjectPermissionEntry(req.user, project._id);
+      if (!Array.isArray(permission?.partIds) || permission.partIds.length === 0) {
+        return res.status(403).json({ message: 'Bạn không có quyền dự đoán cho ảnh này.' });
+      }
+
+      let imagePartId = image.partId ? String(image.partId) : '';
+      if (!imagePartId) {
+        // Older images without a persisted part assignment still use the legacy mapping.
+        const projectImages = await Image.find({ projectId: project._id })
+          .select('_id uploadDate partId');
+        const { map } = getImagePartMap(
+          projectImages, project.splitRatios || [], project.splitPercent || 100, project.imagesPerPart || null
+        );
+        imagePartId = String(map.get(String(image._id))?.partId || '');
+      }
+      if (!permission.partIds.some((partId) => String(partId) === imagePartId)) {
+        return res.status(403).json({ message: 'Bạn không có quyền dự đoán cho ảnh này.' });
+      }
+    }
+
+    const imageKey = getImageObjectName(image);
+    if (!imageKey) {
+      return res.status(404).json({ message: 'Không tìm thấy tệp ảnh.' });
     }
 
     const result = await callAiService('/predict', {
-      minio_path:  aiModel.minioPath,
-      image_url:   imageUrl,
-      // classNames: danh sách nhãn từ project, dùng để map index → tên
-      // khi model không nhúng sẵn tên class (ONNX, torch thuần, ...)
-      class_names: Array.isArray(classNames) && classNames.length > 0
-        ? classNames
+      minio_path: aiModel.minioPath,
+      image_key: imageKey,
+      // Always use the labels of the image's project, never client-supplied labels.
+      class_names: Array.isArray(project.labels) && project.labels.length > 0
+        ? project.labels
         : undefined,
     });
 
     return res.status(result.status).json(result.data);
   } catch (error) {
     console.error('Lỗi gọi predict model:', error);
+    if (error?.name === 'CastError') {
+      return res.status(400).json({ message: 'imageId hoặc model id không hợp lệ.' });
+    }
     return res.status(500).json({ message: 'Lỗi server khi gọi AI service', error: error.message });
   }
 });

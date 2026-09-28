@@ -2,6 +2,7 @@ const express = require('express');
 const Evaluation = require('../models/Evaluation');
 const User = require('../models/User');
 const { verifyAdmin } = require('../middleware/authmiddleware');
+const { getImageDisplayName } = require('../utils/imageFile');
 const router = express.Router();
 
 const toCsvField = (value) => {
@@ -13,7 +14,7 @@ router.get('/export/:projectId', verifyAdmin, async (req, res) => {
   try {
     const { projectId } = req.params;
     const data = await Evaluation.find({ projectId })
-      .populate('imageId', 'filename path') 
+      .populate('imageId', 'filename storageKey path')
       .populate('userId', 'username') 
       .select('finalLabels evaluatedAt');
 
@@ -35,7 +36,7 @@ router.get('/export/:projectId', verifyAdmin, async (req, res) => {
       if (!item.imageId) return;
 
       const imageId = String(item.imageId._id || item.imageId);
-      const imageName = item.imageId.filename || 'unknown';
+      const imageName = getImageDisplayName(item.imageId);
       const annotator = item.userId && item.userId.username;
       const labels = Array.isArray(item.finalLabels) ? item.finalLabels : [];
       const uniqueLabels = Array.from(new Set(labels.map((label) => String(label).trim()).filter(Boolean)));
@@ -98,7 +99,7 @@ router.get('/export/user/:userId', verifyAdmin, async (req, res) => {
     }
 
     const evaluations = await Evaluation.find({ userId })
-      .populate('imageId', 'filename path')
+      .populate('imageId', 'filename storageKey path')
       .populate('userId', 'username')
       .select('finalLabels evaluatedAt')
       .sort({ evaluatedAt: -1 });
@@ -114,7 +115,7 @@ router.get('/export/user/:userId', verifyAdmin, async (req, res) => {
       if (!item.imageId) return;
 
       const imageId = String(item.imageId._id || item.imageId);
-      const imageName = item.imageId.filename || 'unknown';
+      const imageName = getImageDisplayName(item.imageId);
       const annotator = item.userId && item.userId.username;
       const labels = Array.isArray(item.finalLabels) ? item.finalLabels : [];
       const uniqueLabels = Array.from(new Set(labels.map((label) => String(label).trim()).filter(Boolean)));

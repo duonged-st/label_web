@@ -4,9 +4,11 @@ const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Project = require('../models/Project');
-const { normalizeSplitRatios } = require('../utils/projectAccess');
+const Image = require('../models/Image');
+const { getProjectPartIds } = require('../utils/projectAccess');
+const { ensureProjectImageParts } = require('../utils/imageParts');
 const { validateAccountCredentials, normalizeManagedRole } = require('../utils/accountSecurity');
-const { verifyAdmin } = require('../middleware/authmiddleware');
+const { verifyAdmin, verifyToken } = require('../middleware/authmiddleware');
 const router = express.Router();
 
 const normalizeProjectIdList = (projectIds) => Array.from(new Set(
@@ -44,7 +46,7 @@ const buildSyncedProjectPermissions = async (allowedProjectIds, existingPermissi
   }
 
   const projects = await Project.find({ _id: { $in: normalizedAllowedProjectIds } })
-    .select('_id splitRatios splitPercent');
+    .select('_id splitRatios splitPercent imagesPerPart');
 
   const existingPermissionMap = new Map(
     (Array.isArray(existingPermissions) ? existingPermissions : []).map((entry) => [
@@ -55,21 +57,20 @@ const buildSyncedProjectPermissions = async (allowedProjectIds, existingPermissi
 
   const nextProjectPermissions = [];
 
-  projects.forEach((project) => {
-    const ratios = normalizeSplitRatios(project.splitRatios, project.splitPercent || 100);
-    if (ratios.length <= 1) {
-      return;
-    }
+  for (const project of projects) {
+    await ensureProjectImageParts(project);
+    const images = await Image.find({ projectId: project._id }).select('_id partId').lean();
+    const validPartIds = getProjectPartIds(images, project.splitRatios, project.splitPercent, project.imagesPerPart);
+    if (validPartIds.length === 0) validPartIds.push('1');
 
-    const validPartIds = Array.from({ length: ratios.length }, (_, index) => String(index + 1));
     const currentPartIds = existingPermissionMap.get(String(project._id)) || [];
     const filteredCurrentPartIds = currentPartIds.filter((partId) => validPartIds.includes(partId));
 
     nextProjectPermissions.push({
       projectId: project._id,
-      partIds: filteredCurrentPartIds.length > 0 ? filteredCurrentPartIds : validPartIds
+      partIds: existingPermissionMap.has(String(project._id)) ? filteredCurrentPartIds : validPartIds
     });
-  });
+  }
 
   return nextProjectPermissions;
 };
@@ -136,7 +137,8 @@ router.post('/users', verifyAdmin, async (req, res) => {
   }
 });
 
-router.get('/users/me/shuffle-seed', async (req, res) => {
+// FIX #5: Thêm verifyToken middleware guard tường minh cho route này
+router.get('/users/me/shuffle-seed', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('labelingShuffleSeed');
 

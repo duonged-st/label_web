@@ -1,12 +1,12 @@
 import gc
 import hashlib
+import hmac
 import io
 import os
 import tempfile
 import threading
 import time
 from typing import Any, Dict, List, Optional
-import requests as http_requests
 from flask import Flask, jsonify, request
 from PIL import Image
 # ── TensorFlow GPU setup (chạy trước khi import torch/ort) ───────────────────
@@ -99,6 +99,8 @@ MINIO_ACCESS_KEY= os.getenv("MINIO_ACCESS_KEY","admin")
 MINIO_SECRET_KEY= os.getenv("MINIO_SECRET_KEY","admin123")
 MINIO_SECURE    = os.getenv("MINIO_SECURE","false").lower() == "true"
 MINIO_BUCKET    = os.getenv("MINIO_BUCKET", "aimodels")
+MINIO_IMAGE_BUCKET = os.getenv("MINIO_IMAGE_BUCKET", os.getenv("MINIO_BUCKET_NAME", "originals"))
+AI_SERVICE_TOKEN = os.getenv("AI_SERVICE_TOKEN", "").strip()
 MINIO_CACHE_DIR = os.getenv(
     "MINIO_CACHE_DIR",
     os.path.join(tempfile.gettempdir(), "ai-service-model-cache"),
@@ -607,18 +609,27 @@ def unload_model(minio_path: str) -> bool:
 
 
 # ── Image fetching ────────────────────────────────────────────────────────────
-def _fetch_image(image_url: str) -> Image.Image:
-    if "/minio-storage/" in image_url:
-        image_url = image_url.replace(
-            "/minio-storage/",
-            f"http://{MINIO_ENDPOINT}:{MINIO_PORT}/",
-        )
-    resp = http_requests.get(image_url, timeout=15)
-    resp.raise_for_status()
-    return Image.open(io.BytesIO(resp.content)).convert("RGB")
+def _fetch_image(image_key: str) -> Image.Image:
+    if minio_client is None:
+        raise RuntimeError("MinIO chưa sẵn sàng")
+    response = minio_client.get_object(MINIO_IMAGE_BUCKET, image_key)
+    try:
+        return Image.open(io.BytesIO(response.read())).convert("RGB")
+    finally:
+        response.close()
+        response.release_conn()
 
 
 # ── API ───────────────────────────────────────────────────────────────────────
+@app.before_request
+def require_service_token():
+    if len(AI_SERVICE_TOKEN) < 32:
+        return jsonify({"message": "AI service chưa được cấu hình khóa truy cập an toàn."}), 503
+    supplied = request.headers.get("X-AI-Service-Token", "")
+    if not hmac.compare_digest(supplied.encode("utf-8"), AI_SERVICE_TOKEN.encode("utf-8")):
+        return jsonify({"message": "Không được phép truy cập AI service."}), 401
+
+
 @app.route("/load-model", methods=["POST"])
 def load_model_api():
     try:
@@ -685,14 +696,14 @@ def predict_api():
     try:
         payload     = request.get_json(silent=True) or {}
         minio_path  = str(payload.get("minio_path", "")).strip()
-        image_url   = str(payload.get("image_url", "")).strip()
+        image_key   = str(payload.get("image_key", "")).strip()
         # class_names truyền từ project (dùng cho model không có tên nhúng sẵn)
         class_names: Optional[List[str]] = payload.get("class_names") or None
         if isinstance(class_names, list):
             class_names = [str(c) for c in class_names if c]
 
-        if not minio_path or not image_url:
-            return jsonify({"message": "minio_path và image_url là bắt buộc"}), 400
+        if not minio_path or not image_key:
+            return jsonify({"message": "minio_path và image_key là bắt buộc"}), 400
 
         with models_lock:
             entry = active_models.get(minio_path)
@@ -704,14 +715,14 @@ def predict_api():
             entry["last_used"] = now_ts()
             wrapper: ModelWrapper = entry["model_object"]
 
-        pil_image   = _fetch_image(image_url)
+        pil_image   = _fetch_image(image_key)
         predictions = wrapper.predict(pil_image, class_names=class_names)
 
         return jsonify({
             "message":     "Predict thành công",
             "backend":     wrapper.backend,
             "minio_path":  minio_path,
-            "image_url":   image_url,
+            "image_key":   image_key,
             "predictions": predictions,
         }), 200
 

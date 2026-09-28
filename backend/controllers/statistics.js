@@ -4,6 +4,7 @@ const Image = require('../models/Image');
 const Project = require('../models/Project');
 const User = require('../models/User');
 const { verifyAdmin } = require('../middleware/authmiddleware');
+const { getImageDisplayName } = require('../utils/imageFile');
 const { getImagePartMap, getProjectPermissionEntry, normalizeRole } = require('../utils/projectAccess');
 const router = express.Router();
 router.get('/statistics/dashboard', verifyAdmin, async (req, res) => {
@@ -36,10 +37,10 @@ router.get('/statistics/dashboard', verifyAdmin, async (req, res) => {
       { $sort: { totalLabeled: -1 } }
     ]);
 
-    const projects = await Project.find().select('_id name splitRatios splitPercent').sort({ createdAt: -1 });
+    const projects = await Project.find().select('_id name splitRatios splitPercent imagesPerPart').sort({ createdAt: -1 });
     const projectIds = projects.map((project) => project._id);
     const images = projectIds.length > 0
-      ? await Image.find({ projectId: { $in: projectIds } }).select('_id projectId uploadDate createdAt')
+      ? await Image.find({ projectId: { $in: projectIds } }).select('_id projectId partId uploadDate createdAt')
       : [];
 
     const imagesByProject = images.reduce((accumulator, imageDoc) => {
@@ -54,7 +55,7 @@ router.get('/statistics/dashboard', verifyAdmin, async (req, res) => {
     const projectContexts = new Map();
     projects.forEach((project) => {
       const projectImages = imagesByProject.get(String(project._id)) || [];
-      const { map: imagePartMap } = getImagePartMap(projectImages, project.splitRatios || [], project.splitPercent || 100);
+      const { map: imagePartMap } = getImagePartMap(projectImages, project.splitRatios || [], project.splitPercent || 100, project.imagesPerPart || null);
       const partCounts = {};
 
       projectImages.forEach((imageDoc) => {
@@ -162,12 +163,12 @@ router.get('/statistics/user/:userId', verifyAdmin, async (req, res) => {
     }
 
     const evaluations = await Evaluation.find({ userId })
-      .populate('imageId', 'filename path projectId uploadDate createdAt')
+      .populate('imageId', 'filename storageKey path projectId uploadDate createdAt')
       .populate('projectId', 'name')
       .sort({ evaluatedAt: -1 });
 
     const enrichedEvaluations = evaluations.map((eval) => ({
-      filename: eval.imageId?.filename || 'Unknown',
+      filename: getImageDisplayName(eval.imageId),
       path: eval.imageId?.path || '',
       projectName: eval.projectId?.name || 'Unknown Project',
       finalLabels: eval.finalLabels || [],

@@ -279,7 +279,7 @@ export default function ImageManagement() {
 
                   <div className="p-3">
                     <h3 className="font-medium text-sm mb-1 truncate" title={image.filename}>
-                      {image.filename?.split('-').slice(1).join('-') || image.filename} 
+                      {image.filename}
                     </h3>
                     <p className="text-xs text-gray-500 mb-2 truncate">
                       Dự án: <span className="font-medium text-gray-700">{image.projectId?.name || 'Không xác định'}</span>

@@ -1,28 +1,13 @@
 const express = require('express');
-const minio = require('minio');
 const Image = require('../models/Image');
 const Evaluation = require('../models/Evaluation');
 const Project = require('../models/Project');
 const { verifyAdmin, normalizeRole, hasProjectAccess, getProjectPermissionEntry } = require('../middleware/authmiddleware');
 const { getImagePartMap, getAccessibleProjectIds } = require('../utils/projectAccess');
+const { minioClient, BUCKET_NAME } = require('../config/minio');
+const { getImageDisplayName, getImageObjectName } = require('../utils/imageFile');
+const { ensureProjectImageParts } = require('../utils/imageParts');
 const router = express.Router();
-
-const minioClient = new minio.Client({
-  endPoint: 'minio',
-  port: 9000,
-  useSSL: false,
-  accessKey: 'admin',
-  secretKey: 'admin123'
-});
-
-const BUCKET_NAME = 'originals';
-
-const resolveObjectName = (image) => {
-  if (image.filename) return image.filename;
-  if (!image.path) return null;
-  const parts = String(image.path).split('/');
-  return parts[parts.length - 1] || null;
-};
 
 const objectExists = async (objectName) => {
   try {
@@ -53,7 +38,7 @@ const processProjectImageBatch = async (images) => {
   }
 
   const imageIds = images.map((image) => image._id);
-  const objectNames = images.map((image) => resolveObjectName(image)).filter(Boolean);
+  const objectNames = images.map((image) => getImageObjectName(image)).filter(Boolean);
 
   const deleteResults = await Promise.allSettled(objectNames.map((objectName) => removeObjectSafe(objectName)));
   const failedDeletes = deleteResults.filter((result) => result.status === 'rejected');
@@ -68,7 +53,7 @@ const processProjectImageBatch = async (images) => {
 };
 
 const deleteProjectImagesInBatches = async (projectId, batchSize = 250) => {
-  const cursor = Image.find({ projectId }).select('_id filename path').lean().cursor();
+  const cursor = Image.find({ projectId }).select('_id filename storageKey path').lean().cursor();
   let batch = [];
   let deletedCount = 0;
 
@@ -110,6 +95,11 @@ router.get('/images', async (req, res) => {
       if (!projectId) {
         query.projectId = { $in: allowedProjects };
       }
+    }
+    const legacyProjectIds = await Image.distinct('projectId', { ...query, partId: null });
+    if (legacyProjectIds.length > 0) {
+      const legacyProjects = await Project.find({ _id: { $in: legacyProjectIds } });
+      await Promise.all(legacyProjects.map((project) => ensureProjectImageParts(project)));
     }
     // 2. Lấy danh sách ảnh theo query quyền + dự án (chưa lọc status)
     const skipCount = (parsedPage - 1) * parsedLimit;
@@ -197,6 +187,7 @@ router.get('/images', async (req, res) => {
         const personalLabels = personalMap.get(imageDoc._id.toString()) || [];
         return {
           ...imageDoc.toObject(),
+          filename: getImageDisplayName(imageDoc),
           status: personalLabels.length > 0 ? 'Đã gán' : 'Chưa gán',
           finalLabels: personalLabels
         };
@@ -207,6 +198,7 @@ router.get('/images', async (req, res) => {
         const labels = globalEntry ? Array.from(globalEntry.labelsSet) : [];
         return {
           ...imageDoc.toObject(),
+          filename: getImageDisplayName(imageDoc),
           status: labels.length > 0 ? 'Đã gán' : 'Chưa gán',
           finalLabels: labels
         };
@@ -253,9 +245,11 @@ router.delete('/images/:id', verifyAdmin, async (req, res) => {
     // 1. Tìm xem ảnh có tồn tại không
     const image = await Image.findById(imageId);
     if (!image) return res.status(404).json({ message: 'Không tìm thấy ảnh!' });
+    const project = await Project.findById(image.projectId);
+    await ensureProjectImageParts(project);
 
     // 2. Xóa object trên MinIO
-    const objectName = resolveObjectName(image);
+    const objectName = getImageObjectName(image);
     if (objectName) {
       await removeObjectSafe(objectName);
     }
@@ -275,6 +269,8 @@ router.delete('/images/:id', verifyAdmin, async (req, res) => {
 router.delete('/images/project/:projectId', verifyAdmin, async (req, res) => {
   try {
     const { projectId } = req.params;
+    const project = await Project.findById(projectId);
+    await ensureProjectImageParts(project);
     const imageCount = await Image.countDocuments({ projectId });
 
     if (imageCount === 0) {

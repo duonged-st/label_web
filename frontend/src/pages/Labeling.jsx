@@ -30,9 +30,8 @@ export default function Labeling() {
     return path;
   };
 
-  const getFileName = (path) => {
-    if (!path) return 'Unknown';
-    return path.split(/[/\\]/).pop();
+  const getFileName = (image) => {
+    return image?.filename || 'Unknown';
   };
 
   useEffect(() => {
@@ -173,8 +172,8 @@ export default function Labeling() {
   }, [selectedImageId, currentImage]);
 
   // Gọi AI predict mỗi khi đổi ảnh (nếu project có model)
-  const runPrediction = useCallback(async (imageUrl, modelId, projectLabels = []) => {
-    if (!imageUrl || !modelId) return;
+  const runPrediction = useCallback(async (imageId, modelId) => {
+    if (!imageId || !modelId) return;
 
     // Hủy request cũ nếu có
     if (predictionAbortRef.current) {
@@ -195,15 +194,27 @@ export default function Labeling() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        // classNames: truyền nhãn project để AI service map index → tên
-        // (cần thiết cho ONNX / torch thuần / Keras không nhúng tên sẵn)
-        body: JSON.stringify({ imageUrl, classNames: projectLabels }),
+        body: JSON.stringify({ imageId }),
         signal: controller.signal
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setPredictionError(data.message || 'Không thể lấy gợi ý từ model.');
+        const msg = String(data.message || '');
+        const isNotLoaded =
+          response.status === 409 ||
+          msg.includes('chưa được nạp') ||
+          msg.includes('load lại model') ||
+          msg.includes('chưa được load');
+
+        if (isNotLoaded) {
+          setIsAiModelLoaded(false);
+          setAiSuggestions([]);
+          setPredictionError('');
+          return;
+        }
+
+        setPredictionError(msg || 'Không thể lấy gợi ý từ model.');
         return;
       }
 
@@ -232,9 +243,7 @@ export default function Labeling() {
       setPredictionError('');
       return;
     }
-    const imageUrl = getImageUrl(currentImage.path);
-    const projectLabels = selectedProject?.labels || [];
-    runPrediction(imageUrl, aiModelInfo.id, projectLabels);
+    runPrediction(currentImage._id, aiModelInfo.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedImageId, aiModelInfo, isAiModelLoaded]);
 
@@ -282,7 +291,7 @@ export default function Labeling() {
             : img
         );
         setImages(newImages);
-        alert(`Đã lưu nhãn "${selectedLabels.join(', ')}" cho ảnh ${getFileName(currentImage.path)}`);
+        alert(`Đã lưu nhãn "${selectedLabels.join(', ')}" cho ảnh ${getFileName(currentImage)}`);
       } else {
         alert('Lỗi khi lưu nhãn!');
       }
@@ -371,7 +380,7 @@ export default function Labeling() {
 
           <div className="p-2 overflow-y-auto flex-1">
             {images.map((image) => {
-              const fileName = getFileName(image.path);
+              const fileName = getFileName(image);
               return (
                 <button
                   key={image._id}
@@ -397,7 +406,7 @@ export default function Labeling() {
           {currentImage ? (
             <div className="max-w-4xl mx-auto">
               <h1 className="text-xl font-bold mb-4 text-gray-800">
-                Classification of {getFileName(currentImage.path)}
+                Classification of {getFileName(currentImage)}
               </h1>
 
               {/* Image viewer */}
@@ -405,7 +414,7 @@ export default function Labeling() {
                 <div className="relative w-full h-[50vh] flex justify-center items-center bg-gray-100 rounded border border-gray-200 overflow-hidden">
                   <img
                     src={getImageUrl(currentImage.path)}
-                    alt={getFileName(currentImage.path)}
+                    alt={getFileName(currentImage)}
                     style={{ transform: `scale(${zoomLevel})`, transition: 'transform 0.2s ease-in-out' }}
                     className="max-w-full max-h-full object-contain origin-center"
                   />

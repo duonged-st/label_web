@@ -33,11 +33,9 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   }
   
   if (adminOnly) {
-    const roleFromStorage = String(localStorage.getItem('userRole') || '').toLowerCase();
     const roleFromToken = String(payload.role || 'user').toLowerCase();
-    const finalRole = roleFromStorage || roleFromToken;
-    if (finalRole !== 'admin') {
-      return <Navigate to="/dashboard" replace />;
+    if (roleFromToken !== 'admin') {
+      return <Navigate to="/labeling" replace />;
     }
   }
   return children;

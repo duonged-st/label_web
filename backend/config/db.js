@@ -2,17 +2,12 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 async function seedDefaultAdmin() {
-  const adminUsername = String(process.env.ADMIN_USERNAME || '').trim();
-  const adminPassword = String(process.env.ADMIN_PASSWORD || '');
+  const customUsername = String(process.env.ADMIN_USERNAME || '').trim();
+  const customPassword = String(process.env.ADMIN_PASSWORD || '').trim();
 
-  if (!adminUsername && !adminPassword) {
-    console.warn('Bỏ qua tạo admin mặc định: chưa cấu hình ADMIN_USERNAME và ADMIN_PASSWORD.');
-    return;
-  }
-
-  if (!adminUsername || adminPassword.length < 12) {
-    throw new Error('ADMIN_USERNAME và ADMIN_PASSWORD (ít nhất 12 ký tự) phải được cấu hình cùng nhau.');
-  }
+  // Xác định username và password admin (ưu tiên env, nếu không có thì dùng mặc định)
+  const adminUsername = customUsername || 'admin';
+  const adminPassword = customPassword || 'admin12345678';
 
   try {
     const adminExists = await User.findOne({ username: adminUsername });
@@ -25,13 +20,12 @@ async function seedDefaultAdmin() {
         role: 'admin',
         allowedProjects: []
       });
-      console.log(`Đã tạo tài khoản quản trị '${adminUsername}'.`);
+      console.log(`✅ Đã khởi tạo tài khoản quản trị mặc định: '${adminUsername}'`);
     } else {
-      console.log('Tài khoản quản trị đã có sẵn, bỏ qua.');
+      console.log(`ℹ️ Tài khoản quản trị '${adminUsername}' đã có sẵn trong cơ sở dữ liệu.`);
     }
   } catch (err) {
-    console.error('Lỗi khi tự động tạo admin:', err);
-    throw err;
+    console.error('⚠️ Lỗi khi khởi tạo tài khoản admin mặc định:', err.message);
   }
 }
 const connectDB = async () => {

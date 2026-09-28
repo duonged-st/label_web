@@ -16,7 +16,9 @@ const getAccessibleProjectIds = (user) => {
   allowedProjects.forEach((projectId) => ids.add(normalizeId(projectId)));
   projectPermissions.forEach((entry) => {
     if (entry?.projectId) {
-      ids.add(normalizeId(entry.projectId));
+      const id = normalizeId(entry.projectId);
+      if (Array.isArray(entry.partIds) && entry.partIds.length > 0) ids.add(id);
+      else ids.delete(id);
     }
   });
 
@@ -27,28 +29,28 @@ const hasProjectAccess = (user, projectId) => {
   if (!user || !projectId) return false;
   if (normalizeRole(user.role) === 'admin') return true;
 
+  const permissionEntry = getProjectPermissionEntry(user, projectId);
+  if (permissionEntry) return Array.isArray(permissionEntry.partIds) && permissionEntry.partIds.length > 0;
+
   const allowedProjects = Array.isArray(user.allowedProjects) ? user.allowedProjects : [];
   if (allowedProjects.some((allowedProjectId) => normalizeId(allowedProjectId) === normalizeId(projectId))) {
     return true;
   }
 
-  return Boolean(getProjectPermissionEntry(user, projectId));
+  return false;
 };
 
 const hasProjectPartAccess = (user, projectId, sectionId) => {
   if (!user || !projectId || !sectionId) return false;
   if (normalizeRole(user.role) === 'admin') return true;
 
-  const allowedProjects = Array.isArray(user.allowedProjects) ? user.allowedProjects : [];
-  if (allowedProjects.some((allowedProjectId) => normalizeId(allowedProjectId) === normalizeId(projectId))) {
-    return true;
+  const permissionEntry = getProjectPermissionEntry(user, projectId);
+  if (permissionEntry) {
+    return Array.isArray(permissionEntry.partIds) && permissionEntry.partIds.some((partId) => normalizeId(partId) === normalizeId(sectionId));
   }
 
-  const permissionEntry = getProjectPermissionEntry(user, projectId);
-  if (!permissionEntry) return false;
-
-  const partIds = Array.isArray(permissionEntry.partIds) ? permissionEntry.partIds : [];
-  return partIds.some((partId) => normalizeId(partId) === normalizeId(sectionId));
+  const allowedProjects = Array.isArray(user.allowedProjects) ? user.allowedProjects : [];
+  return allowedProjects.some((allowedProjectId) => normalizeId(allowedProjectId) === normalizeId(projectId));
 };
 
 const normalizeSplitRatios = (splitRatios, splitPercent = 100) => {
@@ -61,11 +63,15 @@ const normalizeSplitRatios = (splitRatios, splitPercent = 100) => {
     return ratios;
   }
 
-  const percentage = Math.min(100, Math.max(10, Number(splitPercent) || 100));
+  const rawPercent = Number(splitPercent);
+  const percentage = Number.isInteger(rawPercent) && rawPercent >= 10 && rawPercent <= 100 && rawPercent % 10 === 0
+    ? rawPercent
+    : 100;
+
   if (percentage >= 100) return [100];
   
   const rest = 100 - percentage;
-  return rest > 0 ? [percentage, rest] : [100];
+  return rest > 0 && rest % 10 === 0 ? [percentage, rest] : [100];
 };
 
 const buildProjectParts = (totalImages, splitRatios = [], splitPercent = 100, imagesPerPart = null) => {
@@ -136,11 +142,71 @@ const getImagePartMap = (images, splitRatios = [], splitPercent = 100, imagesPer
 
   spans.forEach((span) => {
     sortedImages.slice(span.startIndex, span.endIndex).forEach((imageDoc) => {
-      map.set(String(imageDoc._id), span);
+      const savedPartId = imageDoc.partId ? String(imageDoc.partId) : null;
+      map.set(String(imageDoc._id), savedPartId ? { ...span, partId: savedPartId, name: `Phần ${savedPartId}` } : span);
     });
   });
 
   return { sortedImages, spans, map };
+};
+
+const getProjectPartIds = (images, splitRatios = [], splitPercent = 100, imagesPerPart = null) => {
+  const hasSavedParts = images.some((image) => image.partId);
+  const ids = new Set(imagesPerPart && hasSavedParts
+    ? []
+    : buildProjectParts(images.length, splitRatios, splitPercent, imagesPerPart).map((part) => part.partId));
+  images.forEach((image) => {
+    if (image.partId) ids.add(String(image.partId));
+  });
+  return [...ids].sort((a, b) => Number(a) - Number(b));
+};
+
+const assignNewImagePartIds = (project, images, count) => {
+  const counts = new Map();
+  images.forEach((image) => {
+    if (image.partId) {
+      const id = String(image.partId);
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+  });
+
+  const assigned = [];
+  const imagesPerPart = Number(project.imagesPerPart);
+  let lastPartNumber = Math.max(
+    Number(project.partSequence) || 0,
+    ...[...counts.keys()].map(Number),
+    0
+  );
+
+  for (let index = 0; index < count; index++) {
+    let partId;
+    if (Number.isInteger(imagesPerPart) && imagesPerPart > 0) {
+      // An emptied part is never reused: its old user permissions may still exist.
+      if (lastPartNumber === 0 || (counts.get(String(lastPartNumber)) || 0) >= imagesPerPart ||
+          ((counts.get(String(lastPartNumber)) || 0) === 0 && Number(project.partSequence) >= lastPartNumber)) {
+        lastPartNumber += 1;
+      }
+      partId = String(lastPartNumber);
+    } else {
+      const ratios = normalizeSplitRatios(project.splitRatios, project.splitPercent);
+      const nextTotal = images.length + index + 1;
+      let bestDeficit = -Infinity;
+      let bestIndex = 0;
+      ratios.forEach((ratio, ratioIndex) => {
+        const deficit = (nextTotal * ratio / 100) - (counts.get(String(ratioIndex + 1)) || 0);
+        if (deficit > bestDeficit) {
+          bestDeficit = deficit;
+          bestIndex = ratioIndex;
+        }
+      });
+      partId = String(bestIndex + 1);
+      lastPartNumber = Math.max(lastPartNumber, bestIndex + 1);
+    }
+    counts.set(partId, (counts.get(partId) || 0) + 1);
+    assigned.push(partId);
+  }
+
+  return { partIds: assigned, lastPartNumber };
 };
 
 module.exports = {
@@ -151,5 +217,7 @@ module.exports = {
   getAccessibleProjectIds,
   normalizeSplitRatios,
   buildProjectParts,
-  getImagePartMap
+  getImagePartMap,
+  getProjectPartIds,
+  assignNewImagePartIds
 };

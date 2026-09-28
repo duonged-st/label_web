@@ -27,8 +27,8 @@ services:
       - backend   
   ai-service:
     build: ./ai-service
-    ports:
-      - "5001:5001"
+    env_file:
+      - ./backend/.env
     depends_on:
       - minio
     environment:

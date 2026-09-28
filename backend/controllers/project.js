@@ -1,23 +1,28 @@
 const express = require('express');
-const minio = require('minio');
+const mongoose = require('mongoose');
 const Project = require('../models/Project');
 const AiModel = require('../models/AiModel');
 const Image = require('../models/Image');
 const Evaluation = require('../models/Evaluation');
 const User = require('../models/User');
 const { verifyAdmin, normalizeRole } = require('../middleware/authmiddleware');
-const { getAccessibleProjectIds, buildProjectParts, normalizeSplitRatios } = require('../utils/projectAccess');
+const { getAccessibleProjectIds, buildProjectParts, getProjectPartIds, normalizeSplitRatios } = require('../utils/projectAccess');
+const { minioClient, BUCKET_NAME } = require('../config/minio');
+const { getImageObjectName } = require('../utils/imageFile');
+const { ensureProjectImageParts, reassignProjectImageParts } = require('../utils/imageParts');
+const { withProjectWriteLock } = require('../utils/projectWriteLock');
 const router = express.Router();
-
 const validateSplitRatios = (splitRatios) => {
   if (!Array.isArray(splitRatios) || splitRatios.length === 0) {
     return { valid: false, message: 'Vui lòng cấu hình ít nhất một phần cho dự án.' };
   }
 
   const normalized = splitRatios.map((ratio) => Number(ratio));
-  const invalid = normalized.find((ratio) => !Number.isInteger(ratio) || ratio < 1 || ratio > 100);
+  const invalid = normalized.find(
+    (ratio) => !Number.isInteger(ratio) || ratio < 10 || ratio > 100 || ratio % 10 !== 0
+  );
   if (invalid !== undefined) {
-    return { valid: false, message: 'Mỗi phần phải từ 1% đến 100%.' };
+    return { valid: false, message: 'Mỗi phần phải là bội số của 10, từ 10% đến 100%.' };
   }
 
   const sum = normalized.reduce((total, ratio) => total + ratio, 0);
@@ -26,23 +31,6 @@ const validateSplitRatios = (splitRatios) => {
   }
 
   return { valid: true, ratios: normalized };
-};
-
-const minioClient = new minio.Client({
-  endPoint: 'minio',
-  port: 9000,
-  useSSL: false,
-  accessKey: 'admin',
-  secretKey: 'admin123'
-});
-
-const BUCKET_NAME = 'originals';
-
-const resolveObjectName = (image) => {
-  if (image.filename) return image.filename;
-  if (!image.path) return null;
-  const parts = String(image.path).split('/');
-  return parts[parts.length - 1] || null;
 };
 
 const removeObjectSafe = async (objectName) => {
@@ -62,7 +50,7 @@ const processProjectImageBatch = async (images) => {
   }
 
   const imageIds = images.map((image) => image._id);
-  const objectNames = images.map((image) => resolveObjectName(image)).filter(Boolean);
+  const objectNames = images.map((image) => getImageObjectName(image)).filter(Boolean);
 
   const deleteResults = await Promise.allSettled(objectNames.map((objectName) => removeObjectSafe(objectName)));
   const failedDeletes = deleteResults.filter((result) => result.status === 'rejected');
@@ -77,7 +65,7 @@ const processProjectImageBatch = async (images) => {
 };
 
 const deleteProjectImagesInBatches = async (projectId, batchSize = 250) => {
-  const cursor = Image.find({ projectId }).select('_id filename path').lean().cursor();
+  const cursor = Image.find({ projectId }).select('_id filename storageKey path').lean().cursor();
   let batch = [];
   let deletedCount = 0;
 
@@ -95,6 +83,7 @@ const deleteProjectImagesInBatches = async (projectId, batchSize = 250) => {
 
   return deletedCount;
 };
+
 router.post('/projects', verifyAdmin, async (req, res) => {
   const { name, description, labels, splitRatios, splitPercent, aiModelId } = req.body;
   try {
@@ -110,10 +99,23 @@ router.post('/projects', verifyAdmin, async (req, res) => {
       }
     }
 
-    const resolvedRatios = normalizeSplitRatios(splitRatios, splitPercent);
-    const ratioCheck = validateSplitRatios(resolvedRatios);
-    if (!ratioCheck.valid) {
-      return res.status(400).json({ message: ratioCheck.message });
+    let finalSplitRatios = [100];
+    let finalSplitPercent = 100;
+
+    if (splitRatios !== undefined && Array.isArray(splitRatios) && splitRatios.length > 0) {
+      const ratioCheck = validateSplitRatios(splitRatios);
+      if (!ratioCheck.valid) {
+        return res.status(400).json({ message: ratioCheck.message });
+      }
+      finalSplitRatios = ratioCheck.ratios;
+      finalSplitPercent = ratioCheck.ratios[0] || 100;
+    } else if (splitPercent !== undefined) {
+      const sp = Number(splitPercent);
+      if (!Number.isInteger(sp) || sp < 10 || sp > 100 || sp % 10 !== 0) {
+        return res.status(400).json({ message: 'Tỉ lệ chia phải từ 10 đến 100 và tăng theo bước 10%.' });
+      }
+      finalSplitPercent = sp;
+      finalSplitRatios = normalizeSplitRatios([], sp);
     }
 
     const newProject = new Project({
@@ -121,8 +123,8 @@ router.post('/projects', verifyAdmin, async (req, res) => {
       description,
       labels: labels || [],
       aiModelId: aiModelId || null,
-      splitPercent: Number(splitPercent) || 100,
-      splitRatios: ratioCheck.ratios
+      splitPercent: finalSplitPercent,
+      splitRatios: finalSplitRatios
     });
     await newProject.save();
     await newProject.populate('aiModelId', 'name dbVersion minioPath bucketName labelMap');
@@ -135,6 +137,7 @@ router.post('/projects', verifyAdmin, async (req, res) => {
     res.status(500).json({ message: 'Lỗi server' });
   }
 });
+
 router.get('/projects', async (req, res) => {
   try {
     const role = normalizeRole(req.user?.role);
@@ -144,13 +147,32 @@ router.get('/projects', async (req, res) => {
 
     const projects = await Project.find(query).populate('aiModelId', 'name dbVersion minioPath bucketName labelMap').sort({ createdAt: -1 });
     if (role === 'admin') {
-      return res.status(200).json(projects);
+      const projectIds = projects.map((project) => project._id);
+      const legacyIds = await Image.distinct('projectId', { projectId: { $in: projectIds }, partId: null });
+      const legacyIdSet = new Set(legacyIds.map(String));
+      await Promise.all(projects.filter((project) => legacyIdSet.has(String(project._id))).map(ensureProjectImageParts));
+      const partCounts = await Image.aggregate([
+        { $match: { projectId: { $in: projectIds } } },
+        { $group: { _id: { projectId: '$projectId', partId: '$partId' }, count: { $sum: 1 } } }
+      ]);
+      const countsByProject = new Map();
+      partCounts.forEach(({ _id, count }) => {
+        const id = String(_id.projectId);
+        if (!countsByProject.has(id)) countsByProject.set(id, {});
+        countsByProject.get(id)[String(_id.partId)] = count;
+      });
+      return res.status(200).json(projects.map((project) => {
+        const counts = countsByProject.get(String(project._id)) || {};
+        return {
+          ...project.toObject(),
+          imageCount: Object.values(counts).reduce((total, count) => total + count, 0),
+          partCounts: counts
+        };
+      }));
     }
 
     const permissionMap = new Map((req.user?.projectPermissions || []).map((entry) => [String(entry.projectId), entry]));
     const filteredProjects = projects.filter((project) => {
-      const ratios = normalizeSplitRatios(project.splitRatios, project.splitPercent || 100);
-      if (ratios.length <= 1) return true;
       const permissionEntry = permissionMap.get(String(project._id));
       return Boolean(permissionEntry && Array.isArray(permissionEntry.partIds) && permissionEntry.partIds.length > 0);
     });
@@ -161,6 +183,7 @@ router.get('/projects', async (req, res) => {
     res.status(500).json({ message: 'Lỗi server' });
   }
 });
+
 router.put('/projects/:id', verifyAdmin, async (req, res) => {
   try {
     const nextBody = { ...req.body };
@@ -237,21 +260,52 @@ router.put('/projects/:id', verifyAdmin, async (req, res) => {
       }
     }
 
-    const updatedProject = await Project.findByIdAndUpdate(
-      req.params.id, 
-      nextBody, 
-      { new: true } 
-    ).populate('aiModelId', 'name dbVersion minioPath bucketName labelMap');
+    const actualSplitChanged = splitConfigChanged && JSON.stringify({
+      splitPercent: nextBody.splitPercent ?? existingProject.splitPercent,
+      splitRatios: nextBody.splitRatios ?? existingProject.splitRatios,
+      imagesPerPart: nextBody.imagesPerPart !== undefined ? nextBody.imagesPerPart : existingProject.imagesPerPart
+    }) !== JSON.stringify({
+      splitPercent: existingProject.splitPercent,
+      splitRatios: existingProject.splitRatios,
+      imagesPerPart: existingProject.imagesPerPart
+    });
+
+    const updatedProject = await withProjectWriteLock(projectId, async () => {
+      if (actualSplitChanged) {
+        // Repartitioning changes the images behind each part number. Revoke old
+        // grants before the reassignment; admins explicitly grant the new parts.
+        await User.updateMany(
+          {
+            role: { $ne: 'admin' },
+            $or: [
+              { allowedProjects: existingProject._id },
+              { 'projectPermissions.projectId': existingProject._id }
+            ]
+          },
+          {
+            $pull: {
+              allowedProjects: existingProject._id,
+              projectPermissions: { projectId: existingProject._id }
+            }
+          }
+        );
+      }
+
+      const updated = await Project.findByIdAndUpdate(
+        req.params.id,
+        nextBody,
+        { new: true }
+      ).populate('aiModelId', 'name dbVersion minioPath bucketName labelMap');
+      if (updated && actualSplitChanged) await reassignProjectImageParts(updated);
+      return updated;
+    });
     if (!updatedProject) return res.status(404).json({ message: 'Không tìm thấy dự án!' });
 
-    if (splitConfigChanged) {
-      await User.updateMany(
-        { 'projectPermissions.projectId': updatedProject._id },
-        { $pull: { projectPermissions: { projectId: updatedProject._id } } }
-      );
-    }
-
-    res.status(200).json({ message: 'Cập nhật dự án thành công!', project: updatedProject });
+    res.status(200).json({
+      message: 'Cập nhật dự án thành công!',
+      project: updatedProject,
+      permissionsRevoked: actualSplitChanged
+    });
   } catch (error) {
     console.error("Lỗi sửa project:", error);
     res.status(500).json({ message: 'Lỗi server' });
@@ -272,14 +326,9 @@ router.put('/projects/:id/access', verifyAdmin, async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy dự án!' });
     }
 
-    const images = await Image.find({ projectId }).select('_id uploadDate createdAt');
-    const sectionSpans = buildProjectParts(
-      images.length,
-      project.splitRatios || [],
-      project.splitPercent || 100,
-      project.imagesPerPart || null
-    );
-    const validPartIds = sectionSpans.map((section) => section.partId);
+    await ensureProjectImageParts(project);
+    const images = await Image.find({ projectId }).select('_id partId');
+    const validPartIds = getProjectPartIds(images, project.splitRatios || [], project.splitPercent || 100, project.imagesPerPart || null);
     const normalizedPartIds = Array.isArray(partIds) ? Array.from(new Set(partIds.map((partId) => String(partId)))) : [];
 
     if (normalizedPartIds.length === 0) {
@@ -291,12 +340,34 @@ router.put('/projects/:id/access', verifyAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Phần được chọn không hợp lệ với cấu hình dự án hiện tại.' });
     }
 
+    // FIX #2: Gộp 2 lần ghi tách biệt thành 1 atomic aggregation pipeline update để loại trừ race condition
+    const projectObjId = new mongoose.Types.ObjectId(projectId);
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      {
-        $addToSet: { allowedProjects: projectId },
-        $pull: { projectPermissions: { projectId } },
-      },
+      [
+        {
+          $set: {
+            allowedProjects: {
+              $cond: {
+                if: { $in: [projectObjId, { $ifNull: ['$allowedProjects', []] }] },
+                then: '$allowedProjects',
+                else: { $concatArrays: [{ $ifNull: ['$allowedProjects', []] }, [projectObjId]] }
+              }
+            },
+            projectPermissions: {
+              $concatArrays: [
+                {
+                  $filter: {
+                    input: { $ifNull: ['$projectPermissions', []] },
+                    cond: { $ne: ['$$this.projectId', projectObjId] }
+                  }
+                },
+                [{ projectId: projectObjId, partIds: normalizedPartIds }]
+              ]
+            }
+          }
+        }
+      ],
       { new: true }
     ).select('-password');
 
@@ -304,25 +375,17 @@ router.put('/projects/:id/access', verifyAdmin, async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy người dùng!' });
     }
 
-    await User.updateOne(
-      { _id: userId },
-      {
-        $push: {
-          projectPermissions: {
-            projectId,
-            partIds: normalizedPartIds
-          }
-        }
-      }
-    );
-
-    const refreshedUser = await User.findById(userId).select('-password').populate('allowedProjects', 'name');
+    const refreshedUser = await User.findById(userId)
+      .select('-password')
+      .populate('allowedProjects', 'name')
+      .populate('projectPermissions.projectId', 'name splitPercent splitRatios');
     return res.status(200).json({ message: 'Đã cập nhật quyền theo phần thành công!', user: refreshedUser });
   } catch (error) {
     console.error('Lỗi cập nhật quyền dự án:', error);
     return res.status(500).json({ message: 'Lỗi server khi cập nhật quyền dự án' });
   }
 });
+
 router.delete('/projects/:id', verifyAdmin, async (req, res) => {
   try {
     const projectId = req.params.id;
@@ -349,4 +412,5 @@ router.delete('/projects/:id', verifyAdmin, async (req, res) => {
     res.status(500).json({ message: 'Lỗi server' });
   }
 });
+
 module.exports = router;

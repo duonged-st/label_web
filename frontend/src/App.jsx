@@ -20,7 +20,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/dashboard" element={
-          <ProtectedRoutes>
+          <ProtectedRoutes adminOnly={true}>
             <Dashboard />
           </ProtectedRoutes>
         } />

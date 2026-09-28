@@ -13,14 +13,31 @@ const statisticsRoutes = require('./controllers/statistics');
 const userRoutes = require('./controllers/user');
 const exportRoutes = require('./controllers/export');
 const { verifyToken } = require('./middleware/authmiddleware');
+
 connectDB();
 
+const configuredOrigins = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const allowedOrigins = new Set(
-  String(process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
+  configuredOrigins.length > 0
+    ? configuredOrigins
+    : [
+        'http://localhost',
+        'http://localhost:80',
+        'http://localhost:3000',
+        'http://localhost:5000',
+        'http://localhost:5173',
+        'http://127.0.0.1',
+        'http://127.0.0.1:80',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:5173'
+      ]
 );
+
+const isCorsPermissive = configuredOrigins.length === 0 || allowedOrigins.has('*');
 
 // Prevent stale API responses from browser/proxy caches.
 app.set('etag', false);
@@ -35,12 +52,14 @@ app.use('/api', (req, res, next) => {
 app.disable('x-powered-by');
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) {
+    if (!origin || isCorsPermissive || allowedOrigins.has(origin)) {
       return callback(null, true);
     }
     return callback(null, false);
-  }
+  },
+  credentials: true
 }));
+
 app.use('/api', authRoutes);
 app.use('/api', verifyToken);
 app.use('/api', imageRoutes);
@@ -52,7 +71,8 @@ app.use('/api', statisticsRoutes);
 app.use('/api', userRoutes);
 app.use('/api', exportRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-const PORT = 5000;
+
+const PORT = Number(process.env.PORT) || 5000;
 app.listen(PORT, () => {
   console.log(`Server backend đang chạy ở http://localhost:${PORT}`);
 });

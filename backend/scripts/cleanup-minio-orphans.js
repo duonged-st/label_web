@@ -151,20 +151,22 @@ const deleteMinioObjects = async (names) => {
 
   const ImageModel = mongoose.model(
     'Image',
-    new mongoose.Schema({ filename: String, path: String }, { collection: 'images', strict: false })
+    new mongoose.Schema({ filename: String, storageKey: String, path: String }, { collection: 'images', strict: false })
   );
 
   // 2. Đọc filenames từ DB
   console.log('[2/4] Đọc filenames từ MongoDB...');
-  const dbDocs = await ImageModel.find({}, { filename: 1, path: 1 }).lean();
+  const dbDocs = await ImageModel.find({}, { filename: 1, storageKey: 1, path: 1 }).lean();
   const dbFilenames = new Set();
   for (const doc of dbDocs) {
-    if (doc.filename) {
-      dbFilenames.add(doc.filename);
+    if (doc.storageKey) {
+      dbFilenames.add(doc.storageKey);
     } else if (doc.path) {
       const parts = String(doc.path).split('/');
       const name  = parts[parts.length - 1];
       if (name) dbFilenames.add(name);
+    } else if (doc.filename) {
+      dbFilenames.add(doc.filename);
     }
   }
   console.log(`      ✅ ${dbFilenames.size.toLocaleString()} filenames trong DB.\n`);

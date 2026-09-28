@@ -5,23 +5,20 @@ const fs = require('fs');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
 const Image = require('../models/Image');
+const Project = require('../models/Project');
 const { verifyAdmin } = require('../middleware/authmiddleware');
+const { minioClient, BUCKET_NAME } = require('../config/minio');
+const { assignNewImagePartIds } = require('../utils/projectAccess');
+const { ensureProjectImageParts } = require('../utils/imageParts');
+const { withProjectWriteLock } = require('../utils/projectWriteLock');
 const router = express.Router();
-const minio = require('minio');
-const minioClient = new minio.Client({
-  endPoint: 'minio',
-  port: 9000,
-  useSSL: false,
-  accessKey: 'admin',
-  secretKey: 'admin123'
-});
 
 (async () => {
   try {
-    const exists = await minioClient.bucketExists('originals');
+    const exists = await minioClient.bucketExists(BUCKET_NAME);
     if (!exists) {
-      await minioClient.makeBucket('originals');
-      console.log('Đã tạo bucket "originals" trên MinIO');
+      await minioClient.makeBucket(BUCKET_NAME);
+      console.log(`Đã tạo bucket "${BUCKET_NAME}" trên MinIO`);
     }
     const policy = JSON.stringify({
       Version: '2012-10-17',
@@ -29,14 +26,15 @@ const minioClient = new minio.Client({
         Effect: 'Allow',
         Principal: { AWS: ['*'] },
         Action: ['s3:GetObject'],
-        Resource: ['arn:aws:s3:::originals/*']
+        Resource: [`arn:aws:s3:::${BUCKET_NAME}/*`]
       }]
     });
-    await minioClient.setBucketPolicy('originals', policy);
+    await minioClient.setBucketPolicy(BUCKET_NAME, policy);
   } catch (err) {
     console.error('Lỗi khởi tạo MinIO bucket:', err);
   }
 })();
+
 const uploadTempDir = path.join(os.tmpdir(), 'label-web-upload-temp');
 if (!fs.existsSync(uploadTempDir)) {
   fs.mkdirSync(uploadTempDir, { recursive: true });
@@ -75,10 +73,11 @@ const uploadFileWithRetry = async (file, projectId, maxRetries = 3) => {
     try {
       const minioFileName = uuidv4() + '-' + file.originalname;
       const fileStream = fs.createReadStream(file.path);
-      await minioClient.putObject('originals', minioFileName, fileStream, file.size);
+      await minioClient.putObject(BUCKET_NAME, minioFileName, fileStream, file.size);
       return {
-        filename: minioFileName,
-        path: `/minio-storage/originals/${minioFileName}`,
+        filename: file.originalname,
+        storageKey: minioFileName,
+        path: `/minio-storage/${BUCKET_NAME}/${minioFileName}`,
         projectId,
         status: 'Chưa gán'
       };
@@ -97,7 +96,7 @@ const uploadFileWithRetry = async (file, projectId, maxRetries = 3) => {
 const rollbackMinioUploads = async (filenames) => {
   if (!filenames || filenames.length === 0) return;
   const results = await Promise.allSettled(
-    filenames.map((name) => minioClient.removeObject('originals', name))
+    filenames.map((name) => minioClient.removeObject(BUCKET_NAME, name))
   );
   const failed = results.filter((r) => r.status === 'rejected');
   if (failed.length > 0) {
@@ -129,14 +128,28 @@ router.post('/upload', verifyAdmin, upload.array('images'), async (req, res) => 
     if (!projectId) {
       return res.status(400).json({ message: 'Vui lòng chọn danh mục!' });
     }
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ message: 'Không tìm thấy dự án!' });
+    }
 
     // Bước 1: Upload tất cả lên MinIO
     const imageDocs = await uploadFilesInBatches(files, projectId, 5);
-    uploadedFilenames = imageDocs.map((doc) => doc.filename);
+    uploadedFilenames = imageDocs.map((doc) => doc.storageKey);
 
     // Bước 2: Lưu vào DB — nếu lỗi ở đây sẽ rollback MinIO
     try {
-      await Image.insertMany(imageDocs);
+      await withProjectWriteLock(projectId, async () => {
+        const currentProject = await Project.findById(projectId);
+        if (!currentProject) throw new Error('Dự án đã bị xóa trong lúc tải ảnh.');
+        // Preserve the current assignments of images uploaded before partId existed.
+        await ensureProjectImageParts(currentProject);
+        const existingImages = await Image.find({ projectId }).select('partId').lean();
+        const { partIds, lastPartNumber } = assignNewImagePartIds(currentProject, existingImages, imageDocs.length);
+        imageDocs.forEach((doc, index) => { doc.partId = partIds[index]; });
+        await Project.updateOne({ _id: projectId }, { $max: { partSequence: lastPartNumber } });
+        await Image.insertMany(imageDocs);
+      });
     } catch (dbError) {
       console.error('Lỗi lưu DB sau khi upload MinIO, đang rollback...', dbError.message);
       await rollbackMinioUploads(uploadedFilenames);
@@ -156,4 +169,5 @@ router.post('/upload', verifyAdmin, upload.array('images'), async (req, res) => 
     res.status(500).json({ message: 'Lỗi server khi upload ảnh' });
   }
 });
+
 module.exports = router;

@@ -7,6 +7,7 @@ const projectSchema = new mongoose.Schema({
   splitPercent: { type: Number, default: 100, min: 10, max: 100 },
   splitRatios: [{ type: Number }],
   imagesPerPart: { type: Number, default: null },
+  partSequence: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now }
 });
 module.exports = mongoose.model('Project', projectSchema);

@@ -3,7 +3,7 @@ import { LayoutDashboard, Images, Users, Tag, LogOut, BarChart3, Menu, X, Tags, 
 import { useEffect, useState } from 'react';
 
 const menuItems = [
-  { icon: LayoutDashboard, label: 'Upload ảnh', path: '/dashboard' }, 
+  { icon: LayoutDashboard, label: 'Upload ảnh', path: '/dashboard', adminOnly: true },
   { icon: Images, label: 'Quản lý ảnh', path: '/image-management' },
   { icon: Tag, label: 'Gán nhãn', path: '/labeling' },
   { icon: Tags, label: 'Quản lý nhãn', path: '/label-management', adminOnly: true },

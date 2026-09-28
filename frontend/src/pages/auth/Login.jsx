@@ -22,7 +22,7 @@ export default function Login() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('userRole', normalizedRole);
         localStorage.setItem('user', JSON.stringify({ username: normalizedUsername, role: normalizedRole }));
-        Navigate('/dashboard');
+        Navigate(normalizedRole === 'admin' ? '/dashboard' : '/labeling');
       } else {
         alert(data.message); 
       }

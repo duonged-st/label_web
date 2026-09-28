@@ -2,14 +2,17 @@ const express = require('express');
 const Evaluation = require('../models/Evaluation');
 const Image = require('../models/Image');
 const Project = require('../models/Project');
-const { hasProjectAccess, getProjectPermissionEntry } = require('../middleware/authmiddleware');
-const { getImagePartMap } = require('../utils/projectAccess');
+const { hasProjectAccess, normalizeRole } = require('../middleware/authmiddleware');
+const { canUserAccessImage } = require('../utils/imageParts');
 const router = express.Router();
+
 router.post('/evaluate', async (req, res) => {
   const { imageId, projectId, finalLabels } = req.body;
-  const userId = req.user.userId; 
+  const userId = req.user?.userId;
+  const userRole = normalizeRole(req.user?.role);
+
   try {
-    if (!req.user || (String(req.user.role).toLowerCase() !== 'admin' && !hasProjectAccess(req.user, projectId))) {
+    if (!req.user || (userRole !== 'admin' && !hasProjectAccess(req.user, projectId))) {
       return res.status(403).json({ message: 'Bạn không có quyền gán nhãn cho dự án này!' });
     }
 
@@ -17,7 +20,7 @@ router.post('/evaluate', async (req, res) => {
       return res.status(400).json({ message: 'Vui lòng chọn nhãn!' });
     }
 
-    const image = await Image.findById(imageId).select('projectId');
+    const image = await Image.findById(imageId).select('projectId partId');
     if (!image) {
       return res.status(404).json({ message: 'Không tìm thấy ảnh!' });
     }
@@ -26,18 +29,9 @@ router.post('/evaluate', async (req, res) => {
       return res.status(400).json({ message: 'Ảnh không thuộc dự án đã chọn!' });
     }
 
-    const permissionEntry = getProjectPermissionEntry(req.user, projectId);
-    const project = await Project.findById(projectId).select('splitPercent splitRatios');
-    const isSplitProject = Array.isArray(project?.splitRatios) ? project.splitRatios.length > 1 : (project?.splitPercent || 100) < 100;
-    if (isSplitProject) {
-      if (!permissionEntry || !Array.isArray(permissionEntry.partIds) || permissionEntry.partIds.length === 0) {
-        return res.status(403).json({ message: 'Dự án này đã được chia phần. Bạn chưa được cấp phần nào.' });
-      }
-
-      const imagesInProject = await Image.find({ projectId }).select('_id uploadDate createdAt');
-      const { map } = getImagePartMap(imagesInProject, project?.splitRatios || [], project?.splitPercent || 100);
-      const partInfo = map.get(String(image._id));
-      if (!partInfo || !permissionEntry.partIds.includes(String(partInfo.partId))) {
+    if (userRole !== 'admin') {
+      const project = await Project.findById(projectId).select('splitPercent splitRatios imagesPerPart');
+      if (!project || !(await canUserAccessImage(req.user, project, image))) {
         return res.status(403).json({ message: 'Bạn không có quyền gán nhãn cho phần này của dự án!' });
       }
     }
@@ -58,30 +52,24 @@ router.post('/evaluate', async (req, res) => {
     res.status(500).json({ message: 'Lỗi server khi gán nhãn' });
   }
 });
+
 router.delete('/evaluate/:imageId', async (req, res) => {
   try {
     const { imageId } = req.params;
-    const image = await Image.findById(imageId).select('projectId');
+    const userRole = normalizeRole(req.user?.role);
+
+    const image = await Image.findById(imageId).select('projectId partId');
     if (!image) {
       return res.status(404).json({ message: 'Không tìm thấy ảnh!' });
     }
 
-    if (!req.user || (String(req.user.role).toLowerCase() !== 'admin' && !hasProjectAccess(req.user, image.projectId))) {
+    if (!req.user || (userRole !== 'admin' && !hasProjectAccess(req.user, image.projectId))) {
       return res.status(403).json({ message: 'Bạn không có quyền thao tác trên dự án này!' });
     }
 
-    const permissionEntry = getProjectPermissionEntry(req.user, image.projectId);
-    const project = await Project.findById(image.projectId).select('splitPercent splitRatios');
-    const isSplitProject = Array.isArray(project?.splitRatios) ? project.splitRatios.length > 1 : (project?.splitPercent || 100) < 100;
-    if (isSplitProject) {
-      if (!permissionEntry || !Array.isArray(permissionEntry.partIds) || permissionEntry.partIds.length === 0) {
-        return res.status(403).json({ message: 'Dự án này đã được chia phần. Bạn chưa được cấp phần nào.' });
-      }
-
-      const imagesInProject = await Image.find({ projectId: image.projectId }).select('_id uploadDate createdAt');
-      const { map } = getImagePartMap(imagesInProject, project?.splitRatios || [], project?.splitPercent || 100);
-      const partInfo = map.get(String(image._id));
-      if (!partInfo || !permissionEntry.partIds.includes(String(partInfo.partId))) {
+    if (userRole !== 'admin') {
+      const project = await Project.findById(image.projectId).select('splitPercent splitRatios imagesPerPart');
+      if (!project || !(await canUserAccessImage(req.user, project, image))) {
         return res.status(403).json({ message: 'Bạn không có quyền reset nhãn của phần này!' });
       }
     }
@@ -97,4 +85,5 @@ router.delete('/evaluate/:imageId', async (req, res) => {
     res.status(500).json({ message: 'Lỗi server khi reset nhãn' });
   }
 });
+
 module.exports = router;

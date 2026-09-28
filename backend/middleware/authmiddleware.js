@@ -5,7 +5,7 @@ const { jwtSecret } = require('../config/security');
 
 const verifyToken = (req, res, next) => {
   const authHeader = req.header('Authorization');
-  const token = authHeader && authHeader.split(' ')[1]; 
+  const token = authHeader && authHeader.split(' ')[1];
   if (!token) {
     return res.status(401).json({ message: 'Từ chối truy cập! Vui lòng đăng nhập.' });
   }
@@ -38,6 +38,7 @@ const verifyToken = (req, res, next) => {
     return res.status(403).json({ message: 'Token không hợp lệ hoặc đã hết hạn!' });
   }
 };
+
 const verifyAdmin = (req, res, next) => {
   verifyToken(req, res, () => {
     const role = normalizeRole(req.user.role);
@@ -48,22 +49,26 @@ const verifyAdmin = (req, res, next) => {
   });
 };
 
+// FIX #1: verifyProjectAccess tự gọi verifyToken bên trong để đảm bảo
+// req.user luôn được xác thực, tránh crash khi dùng middleware độc lập.
 const verifyProjectAccess = (req, res, next) => {
-  const projectId = req.body?.projectId || req.query?.projectId || req.params?.projectId;
+  verifyToken(req, res, () => {
+    const projectId = req.body?.projectId || req.query?.projectId || req.params?.projectId || req.params?.id;
 
-  if (!projectId) {
-    return res.status(400).json({ message: 'Thiếu projectId để kiểm tra quyền truy cập!' });
-  }
+    if (!projectId) {
+      return res.status(400).json({ message: 'Thiếu projectId để kiểm tra quyền truy cập!' });
+    }
 
-  if (normalizeRole(req.user?.role) === 'admin') {
+    if (normalizeRole(req.user?.role) === 'admin') {
+      return next();
+    }
+
+    if (!hasProjectAccess(req.user, projectId)) {
+      return res.status(403).json({ message: 'Bạn không có quyền thao tác trên dự án này!' });
+    }
+
     return next();
-  }
-
-  if (!hasProjectAccess(req.user, projectId)) {
-    return res.status(403).json({ message: 'Bạn không có quyền thao tác trên dự án này!' });
-  }
-
-  return next();
+  });
 };
 
 module.exports = { verifyToken, verifyAdmin, verifyProjectAccess, hasProjectAccess, hasProjectPartAccess, getProjectPermissionEntry, normalizeRole };
