@@ -464,7 +464,7 @@ router.post('/ai-models/:id/predict', verifyToken, async (req, res) => {
     }
 
     const image = await Image.findById(imageId);
-    if (!image) {
+    if (!image || image.deletionPending) {
       return res.status(404).json({ message: 'Không tìm thấy ảnh.' });
     }
 

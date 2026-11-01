@@ -7,11 +7,135 @@ const Evaluation = require('../models/Evaluation');
 const User = require('../models/User');
 const { verifyAdmin, normalizeRole } = require('../middleware/authmiddleware');
 const { getAccessibleProjectIds, buildProjectParts, getProjectPartIds, normalizeSplitRatios } = require('../utils/projectAccess');
-const { minioClient, BUCKET_NAME } = require('../config/minio');
-const { getImageObjectName } = require('../utils/imageFile');
 const { ensureProjectImageParts, reassignProjectImageParts } = require('../utils/imageParts');
+const { deleteProjectImagesInBatches } = require('../utils/imageDeletion');
 const { withProjectWriteLock } = require('../utils/projectWriteLock');
+const { buildClassCatalog } = require('../utils/segmentationValidation');
 const router = express.Router();
+
+const labelError = (status, message) => Object.assign(new Error(message), { status });
+
+const validateLabels = (labels) => {
+  if (!Array.isArray(labels)) throw labelError(400, 'Danh sách nhãn phải là một mảng.');
+  const normalized = labels.map((label) => {
+    if (typeof label !== 'string' || !label.trim()) {
+      throw labelError(400, 'Mỗi nhãn phải là một tên không rỗng.');
+    }
+    return label.trim();
+  });
+  if (new Set(normalized).size !== normalized.length) {
+    throw labelError(400, 'Tên nhãn trong dự án không được trùng nhau.');
+  }
+  return normalized;
+};
+
+const planLabelUpdate = (currentLabels, requestedLabels, change) => {
+  const nextLabels = validateLabels(requestedLabels);
+  const current = Array.isArray(currentLabels) ? currentLabels : [];
+  if (change === undefined) {
+    if (current.some((label) => !nextLabels.includes(label))) {
+      throw labelError(400, 'Đổi hoặc xóa nhãn cần chỉ rõ thao tác để cập nhật kết quả gán nhãn.');
+    }
+    return { nextLabels, migration: null };
+  }
+
+  if (!change || typeof change !== 'object' || Array.isArray(change) ||
+      !['rename', 'delete'].includes(change.type) ||
+      typeof change.from !== 'string' || !current.includes(change.from)) {
+    throw labelError(409, 'Nhãn đã thay đổi. Vui lòng tải lại dự án rồi thử lại.');
+  }
+  if (change.type === 'rename' && (typeof change.to !== 'string' || !change.to.trim())) {
+    throw labelError(400, 'Vui lòng nhập tên nhãn mới.');
+  }
+
+  const to = change.type === 'rename' ? change.to.trim() : null;
+  const expected = change.type === 'rename'
+    ? current.map((label) => label === change.from ? to : label)
+    : current.filter((label) => label !== change.from);
+  if (JSON.stringify(nextLabels) !== JSON.stringify(expected) ||
+      (change.type === 'rename' && (to === change.from || current.includes(to)))) {
+    throw labelError(409, 'Danh sách nhãn đã thay đổi. Vui lòng tải lại dự án rồi thử lại.');
+  }
+  return { nextLabels, migration: { type: change.type, from: change.from, to } };
+};
+
+const isTransactionUnsupported = (error) =>
+  /Transaction numbers are only allowed on a replica set member or mongos|Standalone topology does not support transactions/i.test(error?.message || '');
+
+const updateProjectAndEvaluations = async (projectId, nextBody, migration) => {
+  const query = { projectId, finalLabels: migration.from };
+  const loadSnapshots = (session) => {
+    const pending = Evaluation.find(query).lean();
+    return session ? pending.session(session) : pending;
+  };
+  const updateEvaluations = async (session, snapshots) => {
+    const options = session ? { session } : {};
+    if (migration.type === 'rename') {
+      await Evaluation.updateMany(query, [{
+        $set: {
+          finalLabels: {
+            $map: {
+              input: '$finalLabels', as: 'label',
+              in: { $cond: [{ $eq: ['$$label', migration.from] }, migration.to, '$$label'] }
+            }
+          }
+        }
+      }], { ...options, updatePipeline: true });
+    } else {
+      await Evaluation.updateMany(query, { $pull: { finalLabels: migration.from } }, options);
+      // An evaluation with no labels should return to the unlabelled state.
+      for (let offset = 0; offset < snapshots.length; offset += 500) {
+        const ids = snapshots.slice(offset, offset + 500).map((evaluation) => evaluation._id);
+        await Evaluation.deleteMany({ _id: { $in: ids }, finalLabels: { $size: 0 } }, options);
+      }
+    }
+  };
+  const updateProject = (session) => Project.findByIdAndUpdate(
+    projectId, nextBody, { new: true, ...(session ? { session } : {}) }
+  ).populate('aiModelId', 'name dbVersion minioPath bucketName labelMap');
+
+  // Replica sets get a MongoDB transaction. The bundled single-node MongoDB
+  // cannot run transactions, so it uses a serialized write with compensation.
+  if (mongoose.connection.readyState === 1) {
+    const session = await mongoose.startSession();
+    try {
+      let updated;
+      await session.withTransaction(async () => {
+        const snapshots = await loadSnapshots(session);
+        await updateEvaluations(session, snapshots);
+        updated = await updateProject(session);
+        if (!updated) throw labelError(404, 'Không tìm thấy dự án!');
+      });
+      return updated;
+    } catch (error) {
+      if (!isTransactionUnsupported(error)) throw error;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  const snapshots = await loadSnapshots();
+  try {
+    await updateEvaluations(undefined, snapshots);
+    const updated = await updateProject();
+    if (!updated) throw labelError(404, 'Không tìm thấy dự án!');
+    return updated;
+  } catch (error) {
+    if (snapshots.length > 0) {
+      try {
+        await Evaluation.bulkWrite(snapshots.map((evaluation) => ({
+          replaceOne: {
+            filter: { _id: evaluation._id }, replacement: evaluation, upsert: true
+          }
+        })), { ordered: false });
+      } catch (restoreError) {
+        console.error('Không khôi phục được kết quả gán nhãn sau lỗi cập nhật dự án:', restoreError);
+      }
+    }
+    throw error;
+  }
+};
+
 const validateSplitRatios = (splitRatios) => {
   if (!Array.isArray(splitRatios) || splitRatios.length === 0) {
     return { valid: false, message: 'Vui lòng cấu hình ít nhất một phần cho dự án.' };
@@ -33,60 +157,10 @@ const validateSplitRatios = (splitRatios) => {
   return { valid: true, ratios: normalized };
 };
 
-const removeObjectSafe = async (objectName) => {
-  try {
-    await minioClient.removeObject(BUCKET_NAME, objectName);
-  } catch (error) {
-    if (error && (error.code === 'NotFound' || error.code === 'NoSuchKey' || error.statusCode === 404)) {
-      return;
-    }
-    throw error;
-  }
-};
-
-const processProjectImageBatch = async (images) => {
-  if (images.length === 0) {
-    return 0;
-  }
-
-  const imageIds = images.map((image) => image._id);
-  const objectNames = images.map((image) => getImageObjectName(image)).filter(Boolean);
-
-  const deleteResults = await Promise.allSettled(objectNames.map((objectName) => removeObjectSafe(objectName)));
-  const failedDeletes = deleteResults.filter((result) => result.status === 'rejected');
-  if (failedDeletes.length > 0) {
-    console.warn(`Có ${failedDeletes.length} file trên MinIO không xóa được khi dọn dự án.`);
-  }
-
-  await Evaluation.deleteMany({ imageId: { $in: imageIds } });
-  await Image.deleteMany({ _id: { $in: imageIds } });
-
-  return imageIds.length;
-};
-
-const deleteProjectImagesInBatches = async (projectId, batchSize = 250) => {
-  const cursor = Image.find({ projectId }).select('_id filename storageKey path').lean().cursor();
-  let batch = [];
-  let deletedCount = 0;
-
-  for await (const image of cursor) {
-    batch.push(image);
-    if (batch.length >= batchSize) {
-      deletedCount += await processProjectImageBatch(batch);
-      batch = [];
-    }
-  }
-
-  if (batch.length > 0) {
-    deletedCount += await processProjectImageBatch(batch);
-  }
-
-  return deletedCount;
-};
-
 router.post('/projects', verifyAdmin, async (req, res) => {
   const { name, description, labels, splitRatios, splitPercent, aiModelId } = req.body;
   try {
+    const projectLabels = labels === undefined ? [] : validateLabels(labels);
     const existingProject = await Project.findOne({ name });
     if (existingProject) {
       return res.status(400).json({ message: 'Tên bộ dữ liệu này đã tồn tại!' });
@@ -121,7 +195,7 @@ router.post('/projects', verifyAdmin, async (req, res) => {
     const newProject = new Project({
       name,
       description,
-      labels: labels || [],
+      labels: projectLabels,
       aiModelId: aiModelId || null,
       splitPercent: finalSplitPercent,
       splitRatios: finalSplitRatios
@@ -133,8 +207,8 @@ router.post('/projects', verifyAdmin, async (req, res) => {
       project: newProject 
     });
   } catch (error) {
-    console.error("Lỗi khi tạo project:", error);
-    res.status(500).json({ message: 'Lỗi server' });
+    if (!error.status) console.error("Lỗi khi tạo project:", error);
+    res.status(error.status || 500).json({ message: error.status ? error.message : 'Lỗi server' });
   }
 });
 
@@ -187,6 +261,12 @@ router.get('/projects', async (req, res) => {
 router.put('/projects/:id', verifyAdmin, async (req, res) => {
   try {
     const nextBody = { ...req.body };
+    delete nextBody.segmentationClasses;
+    const labelChange = nextBody.labelChange;
+    delete nextBody.labelChange;
+    if (labelChange !== undefined && nextBody.labels === undefined) {
+      return res.status(400).json({ message: 'Thiếu danh sách nhãn cho thao tác cập nhật.' });
+    }
     const projectId = req.params.id;
     const existingProject = await Project.findById(projectId);
     if (!existingProject) return res.status(404).json({ message: 'Không tìm thấy dự án!' });
@@ -271,6 +351,18 @@ router.put('/projects/:id', verifyAdmin, async (req, res) => {
     });
 
     const updatedProject = await withProjectWriteLock(projectId, async () => {
+      let migration = null;
+      if (nextBody.labels !== undefined) {
+        const currentProject = await Project.findById(projectId).select('labels segmentationClasses');
+        if (!currentProject) throw labelError(404, 'Không tìm thấy dự án!');
+        const plan = planLabelUpdate(currentProject.labels, nextBody.labels, labelChange);
+        nextBody.labels = plan.nextLabels;
+        migration = plan.migration;
+        nextBody.segmentationClasses = buildClassCatalog(currentProject.segmentationClasses || [], plan.nextLabels, migration);
+      }
+      if (migration && actualSplitChanged) {
+        throw labelError(400, 'Vui lòng cập nhật nhãn và cách chia dự án trong hai lần riêng biệt.');
+      }
       if (actualSplitChanged) {
         // Repartitioning changes the images behind each part number. Revoke old
         // grants before the reassignment; admins explicitly grant the new parts.
@@ -291,11 +383,11 @@ router.put('/projects/:id', verifyAdmin, async (req, res) => {
         );
       }
 
-      const updated = await Project.findByIdAndUpdate(
-        req.params.id,
-        nextBody,
-        { new: true }
-      ).populate('aiModelId', 'name dbVersion minioPath bucketName labelMap');
+      const updated = migration
+        ? await updateProjectAndEvaluations(projectId, nextBody, migration)
+        : await Project.findByIdAndUpdate(
+          projectId, nextBody, { new: true }
+        ).populate('aiModelId', 'name dbVersion minioPath bucketName labelMap');
       if (updated && actualSplitChanged) await reassignProjectImageParts(updated);
       return updated;
     });
@@ -307,8 +399,8 @@ router.put('/projects/:id', verifyAdmin, async (req, res) => {
       permissionsRevoked: actualSplitChanged
     });
   } catch (error) {
-    console.error("Lỗi sửa project:", error);
-    res.status(500).json({ message: 'Lỗi server' });
+    if (!error.status) console.error("Lỗi sửa project:", error);
+    res.status(error.status || 500).json({ message: error.status ? error.message : 'Lỗi server' });
   }
 });
 
@@ -389,23 +481,38 @@ router.put('/projects/:id/access', verifyAdmin, async (req, res) => {
 router.delete('/projects/:id', verifyAdmin, async (req, res) => {
   try {
     const projectId = req.params.id;
-    const deletedImages = await deleteProjectImagesInBatches(projectId);
+    const result = await withProjectWriteLock(projectId, async () => {
+      const project = await Project.findById(projectId);
+      if (!project) return { missing: true };
 
-    await User.updateMany(
-      { allowedProjects: projectId },
-      { $pull: { allowedProjects: projectId } }
-    );
+      const imageResult = await deleteProjectImagesInBatches(projectId);
+      if (imageResult.failedCount > 0) return imageResult;
 
-    await User.updateMany(
-      { 'projectPermissions.projectId': projectId },
-      { $pull: { projectPermissions: { projectId } } }
-    );
+      await User.updateMany(
+        { allowedProjects: projectId },
+        { $pull: { allowedProjects: projectId } }
+      );
 
-    const deletedProject = await Project.findByIdAndDelete(projectId);
-    if (!deletedProject) return res.status(404).json({ message: 'Không tìm thấy dự án!' });
+      await User.updateMany(
+        { 'projectPermissions.projectId': projectId },
+        { $pull: { projectPermissions: { projectId } } }
+      );
+
+      await Project.findByIdAndDelete(projectId);
+      return imageResult;
+    });
+
+    if (result.missing) return res.status(404).json({ message: 'Không tìm thấy dự án!' });
+    if (result.failedCount > 0) {
+      return res.status(500).json({
+        message: `Đã xóa ${result.deletedCount} ảnh, còn ${result.failedCount} ảnh chưa xóa được. Dự án được giữ lại để thử lại.`,
+        deletedImages: result.deletedCount,
+        failedCount: result.failedCount
+      });
+    }
     res.status(200).json({
       message: 'Đã xóa dự án, ảnh trên MinIO và dữ liệu liên quan thành công!',
-      deletedImages
+      deletedImages: result.deletedCount
     });
   } catch (error) {
     console.error("Lỗi xóa project:", error);

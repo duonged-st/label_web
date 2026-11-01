@@ -4,73 +4,11 @@ const Evaluation = require('../models/Evaluation');
 const Project = require('../models/Project');
 const { verifyAdmin, normalizeRole, hasProjectAccess, getProjectPermissionEntry } = require('../middleware/authmiddleware');
 const { getImagePartMap, getAccessibleProjectIds } = require('../utils/projectAccess');
-const { minioClient, BUCKET_NAME } = require('../config/minio');
-const { getImageDisplayName, getImageObjectName } = require('../utils/imageFile');
+const { getImageDisplayName } = require('../utils/imageFile');
 const { ensureProjectImageParts } = require('../utils/imageParts');
+const { deleteImageWithStorage, deleteProjectImagesInBatches } = require('../utils/imageDeletion');
+const { withProjectWriteLock } = require('../utils/projectWriteLock');
 const router = express.Router();
-
-const objectExists = async (objectName) => {
-  try {
-    await minioClient.statObject(BUCKET_NAME, objectName);
-    return true;
-  } catch (error) {
-    if (error && (error.code === 'NotFound' || error.code === 'NoSuchKey' || error.statusCode === 404)) {
-      return false;
-    }
-    throw error;
-  }
-};
-
-const removeObjectSafe = async (objectName) => {
-  try {
-    await minioClient.removeObject(BUCKET_NAME, objectName);
-  } catch (error) {
-    if (error && (error.code === 'NotFound' || error.code === 'NoSuchKey' || error.statusCode === 404)) {
-      return;
-    }
-    throw error;
-  }
-};
-
-const processProjectImageBatch = async (images) => {
-  if (images.length === 0) {
-    return 0;
-  }
-
-  const imageIds = images.map((image) => image._id);
-  const objectNames = images.map((image) => getImageObjectName(image)).filter(Boolean);
-
-  const deleteResults = await Promise.allSettled(objectNames.map((objectName) => removeObjectSafe(objectName)));
-  const failedDeletes = deleteResults.filter((result) => result.status === 'rejected');
-  if (failedDeletes.length > 0) {
-    console.warn(`Có ${failedDeletes.length} file trên MinIO không xóa được khi dọn ảnh theo dự án.`);
-  }
-
-  await Evaluation.deleteMany({ imageId: { $in: imageIds } });
-  await Image.deleteMany({ _id: { $in: imageIds } });
-
-  return imageIds.length;
-};
-
-const deleteProjectImagesInBatches = async (projectId, batchSize = 250) => {
-  const cursor = Image.find({ projectId }).select('_id filename storageKey path').lean().cursor();
-  let batch = [];
-  let deletedCount = 0;
-
-  for await (const image of cursor) {
-    batch.push(image);
-    if (batch.length >= batchSize) {
-      deletedCount += await processProjectImageBatch(batch);
-      batch = [];
-    }
-  }
-
-  if (batch.length > 0) {
-    deletedCount += await processProjectImageBatch(batch);
-  }
-
-  return deletedCount;
-};
 // [GET] /api/images - Lấy danh sách ảnh 
 router.get('/images', async (req, res) => {
   try {
@@ -79,10 +17,16 @@ router.get('/images', async (req, res) => {
     const isPersonalView = String(personal).toLowerCase() === 'true';
     const parsedPage = Number(page) > 0 ? Number(page) : 1;
     const parsedLimit = Number(limit) > 0 ? Number(limit) : 20;
-    let query = {};
+    let query = { deletionPending: { $ne: true } };
 
     const userRole = normalizeRole(req.user?.role);
     const allowedProjects = getAccessibleProjectIds(req.user);
+    if (userRole === 'admin' && String(req.query.includePending).toLowerCase() === 'true') {
+      delete query.deletionPending;
+    }
+    if (userRole === 'admin' && status === 'Chờ xóa') {
+      query.deletionPending = true;
+    }
 
     // 1. Lọc theo Dự án
     if (projectId) query.projectId = projectId;
@@ -188,7 +132,7 @@ router.get('/images', async (req, res) => {
         return {
           ...imageDoc.toObject(),
           filename: getImageDisplayName(imageDoc),
-          status: personalLabels.length > 0 ? 'Đã gán' : 'Chưa gán',
+          status: imageDoc.deletionPending ? 'Chờ xóa' : (personalLabels.length > 0 ? 'Đã gán' : 'Chưa gán'),
           finalLabels: personalLabels
         };
       });
@@ -199,14 +143,14 @@ router.get('/images', async (req, res) => {
         return {
           ...imageDoc.toObject(),
           filename: getImageDisplayName(imageDoc),
-          status: labels.length > 0 ? 'Đã gán' : 'Chưa gán',
+          status: imageDoc.deletionPending ? 'Chờ xóa' : (labels.length > 0 ? 'Đã gán' : 'Chưa gán'),
           finalLabels: labels
         };
       });
     }
 
     // 4. Lọc trạng thái sau khi đã tính đúng status từ Evaluation
-    if (status === 'Đã gán' || status === 'Chưa gán') {
+    if (status === 'Đã gán' || status === 'Chưa gán' || status === 'Chờ xóa') {
       responseImages = responseImages.filter((image) => image.status === status);
     }
 
@@ -245,19 +189,14 @@ router.delete('/images/:id', verifyAdmin, async (req, res) => {
     // 1. Tìm xem ảnh có tồn tại không
     const image = await Image.findById(imageId);
     if (!image) return res.status(404).json({ message: 'Không tìm thấy ảnh!' });
-    const project = await Project.findById(image.projectId);
-    await ensureProjectImageParts(project);
-
-    // 2. Xóa object trên MinIO
-    const objectName = getImageObjectName(image);
-    if (objectName) {
-      await removeObjectSafe(objectName);
-    }
-
-    // 3. Xóa thông tin ảnh trong Database (bảng Images)
-    await Image.findByIdAndDelete(imageId);
-    // 4. Dọn rác: Xóa luôn tất cả các kết quả gán nhãn liên quan đến ảnh này (nếu có)
-    await Evaluation.deleteMany({ imageId: imageId });
+    const deleted = await withProjectWriteLock(image.projectId, async () => {
+      const currentImage = await Image.findById(imageId);
+      if (!currentImage) return false;
+      const project = await Project.findById(currentImage.projectId);
+      await ensureProjectImageParts(project);
+      return deleteImageWithStorage(currentImage);
+    });
+    if (!deleted) return res.status(404).json({ message: 'Không tìm thấy ảnh!' });
     res.status(200).json({ message: 'Đã xóa ảnh và dọn dẹp dữ liệu thành công!' });
   } catch (error) {
     console.error("Lỗi xóa ảnh:", error);
@@ -269,15 +208,27 @@ router.delete('/images/:id', verifyAdmin, async (req, res) => {
 router.delete('/images/project/:projectId', verifyAdmin, async (req, res) => {
   try {
     const { projectId } = req.params;
-    const project = await Project.findById(projectId);
-    await ensureProjectImageParts(project);
-    const imageCount = await Image.countDocuments({ projectId });
+    const result = await withProjectWriteLock(projectId, async () => {
+      const project = await Project.findById(projectId);
+      await ensureProjectImageParts(project);
+      const imageCount = await Image.countDocuments({ projectId });
+      if (imageCount === 0) return { empty: true };
+      return deleteProjectImagesInBatches(projectId);
+    });
 
-    if (imageCount === 0) {
+    if (result.empty) {
       return res.status(404).json({ message: 'Dự án này không có ảnh để xóa.' });
     }
 
-    const deletedCount = await deleteProjectImagesInBatches(projectId);
+    const { deletedCount, failedCount } = result;
+
+    if (failedCount > 0) {
+      return res.status(500).json({
+        message: `Đã xóa ${deletedCount} ảnh, còn ${failedCount} ảnh chưa xóa được. Vui lòng thử lại.`,
+        deletedCount,
+        failedCount
+      });
+    }
 
     return res.status(200).json({
       message: `Đã xóa toàn bộ ${deletedCount} ảnh của dự án.`,

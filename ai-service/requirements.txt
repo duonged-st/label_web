@@ -6,10 +6,15 @@ Pillow>=9.0.0
 # numpy: TF 2.17 yêu cầu numpy<2.0.0 — pin cứng để tránh conflict
 numpy>=1.23.5,<2.0.0
 
+# Shared by ONNX Runtime and the TensorFlow 2.17 installation in the base image.
+# Keep TF's protobuf upper bound when pip resolves newer ONNX dependencies.
+protobuf>=4.25.8,<5.0.0
+
 # ONNX Runtime CPU
 onnxruntime>=1.18.0
 
-# PyTorch CPU by default; GPU support can be added with a compose/Dockerfile override.
+# Docker installs these from requirements-cpu.txt first and constrains their
+# versions for this install, preventing a switch to CUDA packages from PyPI.
 torch>=2.1.0
 torchvision>=0.16.0
 

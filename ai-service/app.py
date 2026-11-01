@@ -9,10 +9,8 @@ import time
 from typing import Any, Dict, List, Optional
 from flask import Flask, jsonify, request
 from PIL import Image
-# ── TensorFlow GPU setup (chạy trước khi import torch/ort) ───────────────────
 try:
-    import tensorflow as tf  # type: ignore
-    # Bật memory growth để TF không chiếm hết VRAM ngay từ đầu
+    import tensorflow as tf  
     gpus = tf.config.list_physical_devices('GPU')
     for gpu in gpus:
         try:
@@ -21,10 +19,8 @@ try:
             pass
     TF_AVAILABLE = True
     TF_GPU_COUNT = len(gpus)
-    
-    # Patch Keras Layer.__init__ để bỏ qua các tham số không tương thích khi load model từ bản khác
     try:
-        import keras  # type: ignore
+        import keras  
         original_layer_init = keras.src.layers.Layer.__init__
         def patched_layer_init(self, *args, **kwargs):
             kwargs.pop('quantization_config', None)
@@ -38,42 +34,34 @@ except Exception:
     tf = None
     TF_AVAILABLE = False
     TF_GPU_COUNT = 0
-
-# ── Optional imports ──────────────────────────────────────────────────────────
 try:
-    from ultralytics import YOLO  # type: ignore
+    from ultralytics import YOLO  
     YOLO_AVAILABLE = True
 except Exception:
     YOLO = None
     YOLO_AVAILABLE = False
-
 try:
-    import torch  # type: ignore
+    import torch 
     TORCH_AVAILABLE = True
 except Exception:
     torch = None
     TORCH_AVAILABLE = False
-
 try:
-    import onnxruntime as ort  # type: ignore
+    import onnxruntime as ort  
     ORT_AVAILABLE = True
 except Exception:
     ort = None
     ORT_AVAILABLE = False
-
 try:
-    import numpy as np  # type: ignore
+    import numpy as np  
     NUMPY_AVAILABLE = True
 except Exception:
     np = None
     NUMPY_AVAILABLE = False
-
 try:
-    from minio import Minio  # type: ignore
+    from minio import Minio 
 except Exception:
     Minio = None
-
-# ── GPU info (log lúc startup) ────────────────────────────────────────────────
 def _gpu_info() -> Dict:
     info = {"tf_gpus": TF_GPU_COUNT, "cuda_available": False, "ort_gpu": False}
     if TORCH_AVAILABLE and torch is not None:
@@ -83,16 +71,12 @@ def _gpu_info() -> Dict:
     if ORT_AVAILABLE and ort is not None:
         info["ort_gpu"] = "CUDAExecutionProvider" in ort.get_available_providers()
     return info
-
 app = Flask(__name__)
-
-# ── Cấu hình ──────────────────────────────────────────────────────────────────
 MAX_SLOTS = 3
 MODEL_IDLE_SECONDS = 30 * 60
 CLEANUP_INTERVAL_SECONDS = 60
 active_models: Dict[str, Dict[str, Any]] = {}
 models_lock = threading.RLock()
-
 MINIO_ENDPOINT  = os.getenv("MINIO_ENDPOINT",  "minio")
 MINIO_PORT      = int(os.getenv("MINIO_PORT",  "9000"))
 MINIO_ACCESS_KEY= os.getenv("MINIO_ACCESS_KEY","admin")
@@ -108,7 +92,6 @@ MINIO_CACHE_DIR = os.getenv(
 
 if Minio is not None:
     try:
-        # Minio SDK v7.2+ không còn nhận 'port' riêng — phải dùng "host:port"
         _minio_endpoint_str = f"{MINIO_ENDPOINT}:{MINIO_PORT}"
         minio_client = Minio(
             _minio_endpoint_str,
@@ -116,7 +99,6 @@ if Minio is not None:
             secret_key=MINIO_SECRET_KEY,
             secure=MINIO_SECURE,
         )
-        # Kiểm tra kết nối thực sự bằng cách list buckets
         minio_client.list_buckets()
         print(f"[MinIO] Kết nối OK: {_minio_endpoint_str}", flush=True)
     except Exception as _e:
@@ -124,37 +106,19 @@ if Minio is not None:
         minio_client = None
 else:
     minio_client = None
-
 os.makedirs(MINIO_CACHE_DIR, exist_ok=True)
-
-
-# ── ModelWrapper ──────────────────────────────────────────────────────────────
 class ModelWrapper:
-    """
-    Bọc model từ bất kỳ backend nào vào một giao diện thống nhất.
-    backend: 'yolo' | 'onnx' | 'torch' | 'keras' | 'sklearn' | 'unsupported'
-    """
-
-    # Preprocessing chuẩn ImageNet (dùng cho ONNX / torch thuần)
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD  = [0.229, 0.224, 0.225]
-
     def __init__(self, backend: str, model_obj: Any, names: Dict[int, str] = None):
         self.backend    = backend
         self.model_obj  = model_obj
-        self.names      = names or {}   # {0: "cat", 1: "dog", ...}
-
-    # ── Dự đoán công khai ─────────────────────────────────────────────────────
+        self.names      = names or {}  
     def predict(
         self,
         pil_image: Image.Image,
         class_names: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Chạy inference và trả về [{label, confidence, bbox?}].
-        class_names: danh sách nhãn từ project — dùng để map index → tên
-                     khi model không có tên nhúng sẵn (ONNX, torch thuần, ...).
-        """
         if self.backend == "yolo":
             return self._predict_yolo(pil_image)
         if self.backend == "onnx":
@@ -169,14 +133,10 @@ class ModelWrapper:
                 "Hãy chuyển sang ONNX (.onnx) để dùng với ảnh."
             )
         raise RuntimeError(f"Backend '{self.backend}' chưa được hỗ trợ.")
-
-    # ── YOLO (ultralytics) ────────────────────────────────────────────────────
     def _predict_yolo(self, pil_image: Image.Image) -> List[Dict]:
         results = self.model_obj(pil_image, verbose=False)
         predictions: List[Dict] = []
-
         for result in results:
-            # ── Chế độ classification (yolov8-cls) ──────────────────────────
             if hasattr(result, "probs") and result.probs is not None:
                 probs = result.probs
                 for idx in probs.top5:
@@ -184,10 +144,8 @@ class ModelWrapper:
                     confidence = round(float(probs.data[idx].item()), 4)
                     if confidence > 0.01:
                         predictions.append({"label": label, "confidence": confidence})
-
             # ── Chế độ detection (yolov8n / yolov8s ...) ────────────────────
             elif hasattr(result, "boxes") and result.boxes is not None:
-                # Gộp theo class, lấy confidence cao nhất mỗi class
                 best_per_class: Dict[str, float] = {}
                 for box in result.boxes:
                     cls_id    = int(box.cls[0].item())
@@ -269,15 +227,11 @@ class ModelWrapper:
         std  = np.array(self.IMAGENET_STD,  dtype=np.float32)
         arr  = (arr - mean) / std
         tensor = torch.tensor(arr.transpose(2, 0, 1)).unsqueeze(0)
-
         with torch.no_grad():
             out = model(tensor)
-
-        # out có thể là tensor [1, num_classes] hoặc tuple
         if isinstance(out, (tuple, list)):
             out = out[0]
         logits = out[0].cpu().numpy()
-
         e = np.exp(logits - logits.max())
         probs = e / e.sum()
 
@@ -299,7 +253,7 @@ class ModelWrapper:
         class_names: Optional[List[str]] = None,
     ) -> List[Dict]:
         try:
-            import numpy as _np  # type: ignore
+            import numpy as np  
         except ImportError:
             raise RuntimeError("numpy chưa được cài đặt.")
 
@@ -314,13 +268,13 @@ class ModelWrapper:
             h, w = 224, 224
 
         img = pil_image.resize((w, h))
-        arr = _np.array(img, dtype=_np.float32) / 255.0
-        arr = arr[_np.newaxis, ...]
+        arr = np.array(img, dtype=np.float32) / 255.0
+        arr = arr[np.newaxis, ...]
 
         probs = model.predict(arr, verbose=0)[0]
 
         names = self._resolve_names(probs.shape[0], class_names)
-        top_indices = _np.argsort(probs)[::-1]
+        top_indices = np.argsort(probs)[::-1]
         predictions = []
         for idx in top_indices:
             conf = round(float(probs[idx]), 4)
@@ -329,26 +283,16 @@ class ModelWrapper:
             label = names.get(int(idx), f"class_{idx}")
             predictions.append({"label": label, "confidence": conf})
         return predictions
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
     def _resolve_names(
         self, num_classes: int, class_names: Optional[List[str]]
     ) -> Dict[int, str]:
-        """
-        Ưu tiên: model.names → class_names từ project → fallback class_N.
-        """
         if self.names:
             return self.names
         if class_names:
             return {i: n for i, n in enumerate(class_names)}
         return {}
-
-
-# ── Loader ────────────────────────────────────────────────────────────────────
 def _ext(path: str) -> str:
     return os.path.splitext(path)[1].lower()
-
-
 def _load_yolo(path: str) -> ModelWrapper:
     if not YOLO_AVAILABLE:
         raise RuntimeError("ultralytics chưa được cài đặt.")

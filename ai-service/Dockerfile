@@ -11,10 +11,29 @@ RUN rm -f /etc/apt/sources.list.d/cuda*.list /etc/apt/sources.list.d/nvidia*.lis
     && apt-get install -y --no-install-recommends gcc libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_RESUME_RETRIES=10 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN pip install --no-cache-dir --ignore-installed blinker \
-    && pip install --no-cache-dir -r requirements.txt
+# Keep downloads outside image layers and reuse them if a build is interrupted.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade "pip>=25.2,<27" \
+    && python -m pip install --ignore-installed blinker
+
+# Install the matching CPU wheels from PyTorch's own index first. Lock the
+# selected versions so the general dependency resolver cannot replace them
+# with CUDA builds while installing Ultralytics.
+COPY requirements-cpu.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -r requirements-cpu.txt \
+    && python -c "from importlib.metadata import version; from pathlib import Path; Path('torch-cpu-constraints.txt').write_text(''.join(name + '==' + version(name) + '\n' for name in ('torch', 'torchvision')))"
+
+COPY requirements.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -c torch-cpu-constraints.txt -r requirements.txt \
+    && python -m pip check \
+    && python -c "import tensorflow, torch, torchvision, onnxruntime; from ultralytics import YOLO; assert torch.version.cuda is None, 'Expected CPU-only PyTorch'"
 
 COPY app.py ./
 

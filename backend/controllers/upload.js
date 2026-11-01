@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const Image = require('../models/Image');
 const Project = require('../models/Project');
@@ -67,21 +68,21 @@ const unlinkSafe = async (filePath) => {
   }
 };
 
-const uploadFileWithRetry = async (file, projectId, maxRetries = 3) => {
+const uploadFileWithRetry = async (file, projectId, storageKey, maxRetries = 3) => {
   let lastError;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const fileStream = fs.createReadStream(file.path);
     try {
-      const minioFileName = uuidv4() + '-' + file.originalname;
-      const fileStream = fs.createReadStream(file.path);
-      await minioClient.putObject(BUCKET_NAME, minioFileName, fileStream, file.size);
+      await minioClient.putObject(BUCKET_NAME, storageKey, fileStream, file.size);
       return {
         filename: file.originalname,
-        storageKey: minioFileName,
-        path: `/minio-storage/${BUCKET_NAME}/${minioFileName}`,
+        storageKey,
+        path: `/minio-storage/${BUCKET_NAME}/${storageKey}`,
         projectId,
         status: 'Chưa gán'
       };
     } catch (error) {
+      fileStream.destroy();
       lastError = error;
       if (attempt < maxRetries) {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
@@ -93,32 +94,79 @@ const uploadFileWithRetry = async (file, projectId, maxRetries = 3) => {
   throw lastError;
 };
 
+const removeObjectWithRetry = async (objectName, maxRetries = 3) => {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await minioClient.removeObject(BUCKET_NAME, objectName);
+      return;
+    } catch (error) {
+      if (error && (error.code === 'NotFound' || error.code === 'NoSuchKey' || error.statusCode === 404)) return;
+      lastError = error;
+      if (attempt < maxRetries) await new Promise(resolve => setTimeout(resolve, attempt * 200));
+    }
+  }
+  throw lastError;
+};
+
 const rollbackMinioUploads = async (filenames) => {
   if (!filenames || filenames.length === 0) return;
-  const results = await Promise.allSettled(
-    filenames.map((name) => minioClient.removeObject(BUCKET_NAME, name))
-  );
-  const failed = results.filter((r) => r.status === 'rejected');
-  if (failed.length > 0) {
-    console.warn(`[Rollback] Không xóa được ${failed.length}/${filenames.length} file trên MinIO.`);
+  let failedCount = 0;
+  for (let index = 0; index < filenames.length; index += 25) {
+    const batch = filenames.slice(index, index + 25);
+    const results = await Promise.allSettled(batch.map((name) => removeObjectWithRetry(name)));
+    failedCount += results.filter((result) => result.status === 'rejected').length;
+  }
+  if (failedCount > 0) {
+    console.warn(`[Rollback] Không xóa được ${failedCount}/${filenames.length} file trên MinIO.`);
   } else {
     console.log(`[Rollback] Đã xóa ${filenames.length} file khỏi MinIO do lỗi lưu DB.`);
   }
 };
 
-const uploadFilesInBatches = async (files, projectId, batchSize = 5) => {
+const uploadFilesInBatches = async (uploadAttempts, projectId, startedKeys, batchSize = 5) => {
   const results = [];
-  for (let i = 0; i < files.length; i += batchSize) {
-    const batch = files.slice(i, i + batchSize);
-    const batchResults = await Promise.all(batch.map(file => uploadFileWithRetry(file, projectId)));
-    results.push(...batchResults);
+  for (let i = 0; i < uploadAttempts.length; i += batchSize) {
+    const batch = uploadAttempts.slice(i, i + batchSize);
+    // Wait for every started upload before rolling back any object in this batch.
+    const batchResults = await Promise.allSettled(
+      batch.map(({ file, storageKey }) => {
+        startedKeys.push(storageKey);
+        return uploadFileWithRetry(file, projectId, storageKey);
+      })
+    );
+    const failed = batchResults.find((result) => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    results.push(...batchResults.map((result) => result.value));
   }
   return results;
 };
 
+const rollbackDatabaseInsert = async (imageDocs) => {
+  const ids = imageDocs.map((doc) => doc._id);
+  try {
+    // insertMany can write some documents before throwing. Remove those documents
+    // before removing their objects, so no visible DB record points at a deleted file.
+    try {
+      await Image.deleteMany({ _id: { $in: ids } });
+    } catch (deleteError) {
+      console.error('[Rollback] Không xóa hết bản ghi ảnh đã lưu:', deleteError);
+    }
+    const remaining = await Image.find({ _id: { $in: ids } }).select('storageKey').lean();
+    const referencedKeys = new Set(remaining.map((image) => image.storageKey));
+    const unreferencedKeys = imageDocs
+      .filter((doc) => !referencedKeys.has(doc.storageKey))
+      .map((doc) => doc.storageKey);
+    await rollbackMinioUploads(unreferencedKeys);
+  } catch (cleanupError) {
+    // When MongoDB cannot confirm what was written, keep objects for recovery.
+    // Removing them here could leave a persisted image with no file.
+    console.error('[Rollback] Không xác nhận được bản ghi ảnh đã lưu:', cleanupError);
+  }
+};
+
 router.post('/upload', verifyAdmin, upload.array('images'), async (req, res) => {
   const files = req.files || [];
-  let uploadedFilenames = [];
 
   try {
     const { projectId } = req.body;
@@ -134,8 +182,20 @@ router.post('/upload', verifyAdmin, upload.array('images'), async (req, res) => 
     }
 
     // Bước 1: Upload tất cả lên MinIO
-    const imageDocs = await uploadFilesInBatches(files, projectId, 5);
-    uploadedFilenames = imageDocs.map((doc) => doc.storageKey);
+    const uploadAttempts = files.map((file) => ({
+      file,
+      storageKey: `${uuidv4()}-${file.originalname}`
+    }));
+    const startedKeys = [];
+    let imageDocs;
+    try {
+      imageDocs = await uploadFilesInBatches(uploadAttempts, projectId, startedKeys, 5);
+    } catch (uploadError) {
+      // Includes keys whose putObject failed after MinIO had already stored them.
+      await rollbackMinioUploads(startedKeys);
+      throw uploadError;
+    }
+    imageDocs.forEach((doc) => { doc._id = new mongoose.Types.ObjectId(); });
 
     // Bước 2: Lưu vào DB — nếu lỗi ở đây sẽ rollback MinIO
     try {
@@ -152,12 +212,9 @@ router.post('/upload', verifyAdmin, upload.array('images'), async (req, res) => 
       });
     } catch (dbError) {
       console.error('Lỗi lưu DB sau khi upload MinIO, đang rollback...', dbError.message);
-      await rollbackMinioUploads(uploadedFilenames);
+      await rollbackDatabaseInsert(imageDocs);
       throw dbError;
     }
-
-    // Bước 3: Dọn file tạm
-    await Promise.all(files.map((file) => unlinkSafe(file.path)));
 
     res.status(200).json({
       message: `Đã upload và lưu thông tin thành công ${files.length} ảnh lên MinIO!`,
@@ -165,8 +222,9 @@ router.post('/upload', verifyAdmin, upload.array('images'), async (req, res) => 
     });
   } catch (error) {
     console.error('Lỗi chi tiết khi upload lên MinIO:', error);
-    await Promise.all(files.map((file) => unlinkSafe(file.path)));
     res.status(500).json({ message: 'Lỗi server khi upload ảnh' });
+  } finally {
+    await Promise.all(files.map((file) => unlinkSafe(file.path)));
   }
 });
 

@@ -60,7 +60,8 @@ export default function LabelManagement() {
         setNewLabelName('');
         fetchProjects();
       } else {
-        alert('Lỗi khi thêm nhãn!');
+        const data = await response.json();
+        alert(data.message || 'Lỗi khi thêm nhãn!');
       }
     } catch (error) {
       console.error('Lỗi:', error);
@@ -68,7 +69,7 @@ export default function LabelManagement() {
   };
 
   const handleDeleteLabel = async (indexToRemove) => {
-    if (!window.confirm('Bạn có chắc muốn xóa nhãn này?')) return;
+    if (!window.confirm('Xóa nhãn này khỏi dự án và mọi kết quả gán nhãn trước đó?')) return;
 
     try {
       const updatedLabels = selectedDataset.labels.filter((_, index) => index !== indexToRemove);
@@ -80,13 +81,17 @@ export default function LabelManagement() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ labels: updatedLabels })
+        body: JSON.stringify({
+          labels: updatedLabels,
+          labelChange: { type: 'delete', from: selectedDataset.labels[indexToRemove] }
+        })
       });
 
       if (response.ok) {
         fetchProjects();
       } else {
-        alert('Lỗi khi xóa nhãn!');
+        const data = await response.json();
+        alert(data.message || 'Lỗi khi xóa nhãn!');
       }
     } catch (error) {
       console.error('Lỗi:', error);
@@ -104,9 +109,20 @@ export default function LabelManagement() {
       return;
     }
 
+    const oldName = selectedDataset.labels[editingLabelIndex];
+    const newName = editingLabelName.trim();
+    if (newName === oldName) {
+      handleCancelEdit();
+      return;
+    }
+    if (selectedDataset.labels.includes(newName)) {
+      alert('Nhãn này đã tồn tại trong dự án!');
+      return;
+    }
+
     try {
       const updatedLabels = selectedDataset.labels.map((label, index) => 
-        index === editingLabelIndex ? editingLabelName.trim() : label
+        index === editingLabelIndex ? newName : label
       );
 
       const token = localStorage.getItem('token');
@@ -116,7 +132,10 @@ export default function LabelManagement() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ labels: updatedLabels })
+        body: JSON.stringify({
+          labels: updatedLabels,
+          labelChange: { type: 'rename', from: oldName, to: newName }
+        })
       });
 
       if (response.ok) {
@@ -124,7 +143,8 @@ export default function LabelManagement() {
         setEditingLabelName('');
         fetchProjects();
       } else {
-        alert('Lỗi khi cập nhật nhãn!');
+        const data = await response.json();
+        alert(data.message || 'Lỗi khi cập nhật nhãn!');
       }
     } catch (error) {
       console.error('Lỗi:', error);

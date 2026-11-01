@@ -5,6 +5,7 @@ const imageSchema = new mongoose.Schema({
   path: { type: String, required: true },
   projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
   partId: { type: String, default: null },
+  deletionPending: { type: Boolean, default: false },
   status: { type: String, default: 'Chưa gán' }, 
   uploadDate: { type: Date, default: Date.now }
 });

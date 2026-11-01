@@ -3,6 +3,7 @@ const projectSchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true }, 
   description: { type: String },
   labels: [{ type: String }], 
+  segmentationClasses: [{ _id: false, id: Number, name: String, color: String, active: Boolean }],
   aiModelId: { type: mongoose.Schema.Types.ObjectId, ref: 'AiModel', default: null },
   splitPercent: { type: Number, default: 100, min: 10, max: 100 },
   splitRatios: [{ type: Number }],

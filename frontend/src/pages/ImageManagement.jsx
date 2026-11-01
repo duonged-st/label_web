@@ -59,7 +59,7 @@ export default function ImageManagement() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      let url = `/api/images?page=${page}&limit=20&personal=true`;
+      let url = `/api/images?page=${page}&limit=20&personal=true${isAdmin ? '&includePending=true' : ''}`;
       if (filterCategory !== 'all') url += `&projectId=${filterCategory}`;
       if (filterStatus !== 'all') url += `&status=${filterStatus}`;
       if (filterLabel !== 'all') url += `&label=${encodeURIComponent(filterLabel)}`;
@@ -105,15 +105,20 @@ export default function ImageManagement() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      await Promise.all(selectedImages.map(id => 
+      const results = await Promise.allSettled(selectedImages.map(id =>
         fetch(`/api/images/${id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         })
       ));
-      alert('Đã xóa ảnh thành công!');
+      const failedCount = results.filter((result) => result.status === 'rejected' || !result.value.ok).length;
+      if (failedCount > 0) {
+        alert(`${failedCount} ảnh chưa xóa được. Vui lòng thử lại.`);
+      } else {
+        alert('Đã xóa ảnh thành công!');
+      }
       setSelectedImages([]);
-      fetchImages();
+      await fetchImages();
     } catch (error) {
       console.error('Lỗi khi xóa ảnh:', error);
       alert('Có lỗi xảy ra khi xóa ảnh.');
@@ -140,6 +145,7 @@ export default function ImageManagement() {
       const data = await response.json();
       if (!response.ok) {
         alert(data.message || 'Không thể xóa toàn bộ ảnh của dự án này.');
+        await fetchImages();
         return;
       }
       alert(data.message || 'Đã xóa toàn bộ ảnh của dự án.');
@@ -193,6 +199,7 @@ export default function ImageManagement() {
               <option value="all">Tất cả trạng thái</option>
               <option value="Đã gán">Đã gán nhãn</option>
               <option value="Chưa gán">Chưa gán nhãn</option>
+              {isAdmin && <option value="Chờ xóa">Chờ xóa</option>}
             </select>
 
             <select
@@ -255,15 +262,22 @@ export default function ImageManagement() {
                   }`}
                 >
                   <div className="relative aspect-square bg-gray-100 group cursor-pointer" onClick={() => toggleImageSelection(image._id)}>
-                    <img 
-                      src={image.path} 
-                      alt={image.filename}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
+                    {image.deletionPending ? (
+                      <div className="w-full h-full flex items-center justify-center px-5 text-center text-sm text-gray-600">
+                        Ảnh đang chờ dọn dữ liệu. Chọn ảnh và nhấn Xóa để thử lại.
+                      </div>
+                    ) : (
+                      <img
+                        src={image.path}
+                        alt={image.filename}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    )}
 
                     <div className={`absolute top-2 right-2 px-2 py-1 rounded text-xs font-medium ${
-                      image.status === 'Đã gán' ? 'bg-green-500 text-white shadow-sm' : 'bg-orange-500 text-white shadow-sm'
+                      image.deletionPending ? 'bg-gray-700 text-white shadow-sm' :
+                        image.status === 'Đã gán' ? 'bg-green-500 text-white shadow-sm' : 'bg-orange-500 text-white shadow-sm'
                     }`}>
                       {image.status}
                     </div>
